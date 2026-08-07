@@ -141,23 +141,23 @@ accumulate the dataset this mechanism will need.
 
 ## What VS1 leaves behind
 
-Worth being precise about, because the two halves of its output have very
-different value.
+**A catalog of how to structure mechanisms**, in
+[`docs/VS1_MECHANISM_NOTES.md`](docs/VS1_MECHANISM_NOTES.md). Eleven mechanisms,
+what each was for, what happened to it, and the structural rule that follows —
+plus a checklist to run before adding any mechanism here. This is the reason to
+keep the VS1 repository, and it should be read before VS2 gains its second
+mechanism.
 
-**The trading record is not a dataset.** 214 scorecard rows across three runs —
-56 from run 1, 83 from run 2, 75 from run 3 — and run 3's rows include 4×
-duplication from four intraday execution slots, so unique decisions number
-roughly 130 over fourteen months. Nothing can be trained or validated on that.
-It is useful as case studies: individual decisions that can be read end to end.
+**A world-context history.** 929 context rows and 9,046 hydrated items,
+accumulated daily and still growing, contacting no broker. This is the direct
+input to the deferred gating mechanism above.
 
-Any statistic derived from those rows must be recomputed, not read off VS1's
-reports. The raw observations are sound; the metrics built on them came from the
-measurement faults that ended runs 2 and 3.
-
-**The world-context history is a dataset.** 929 context rows and 9,046 hydrated
-items, accumulated daily and still growing. It cost fourteen months to build,
-contacts no broker, and is the direct input to the deferred gating mechanism
-above.
+**Not a trading dataset.** 214 scorecard rows across three runs, and run 3's
+include 4× duplication from four execution slots, so unique decisions number
+roughly 130 over fourteen months. That is a set of worked examples to read, not
+a population to compute over. Any statistic from those rows has to be
+recomputed — the raw observations are sound, but the metrics built on them came
+from the measurement faults that ended runs 2 and 3.
 
 ## Stack
 
