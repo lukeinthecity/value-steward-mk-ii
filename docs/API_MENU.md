@@ -107,8 +107,8 @@ $400 stock trading 5M, despite being a twentieth the money.
 
 There is also `get_market_movers` for biggest gainers and losers. Same cap.
 
-**Conclusion: the universe cannot come from the screener.** It has to come from
-the assets list plus our own ranking — see the open question at the end.
+**Conclusion: the universe cannot come from the screener.** See open question 1
+below for where it comes from instead.
 
 ---
 
@@ -218,8 +218,10 @@ broker publishes this. VS2 should ask rather than encode.
 
 The whole menu above, reduced to what the rule in `DESIGN.md` requires:
 
-1. `get_all_assets()` — once, to establish the universe
-2. Daily bars, **`adjustment=all`**, 51 days back — the only recurring data call
+1. The Wikipedia constituent fetch (`src/vs2/data/sp500.py`) — monthly, to
+   refresh the universe
+2. Daily bars, **`adjustment=all`**, 51 days back — the only recurring Alpaca
+   data call
 3. `get_calendar()` — to know which days are trading days
 4. Account `equity` — to size positions
 5. Positions — to know what is held
@@ -232,11 +234,20 @@ with a stated reason.
 
 ## Open questions this menu raises
 
-Answer before writing code.
-
-1. **Where does the universe come from?** The screener is out (capped at 100,
-   share-volume biased). The options are: rank the assets list by dollar volume
-   ourselves, which is one large monthly bar fetch; or check in a fixed list.
+1. ~~**Where does the universe come from?**~~ **Resolved 2026-08-07: the real
+   S&P 500, scraped from Wikipedia's constituent table.** The screener was out
+   (capped at 100, share-volume biased, returned penny stocks). Third-party
+   sources were surveyed and tested live: the [Nasdaq/NYSE symbol
+   directory](https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt) and
+   [SEC `company_tickers.json`](https://www.sec.gov/files/company_tickers.json)
+   both work but carry no index membership or ranking; iShares publishes IVV's
+   real holdings (literally the S&P 500) but the CSV endpoint returns a bot
+   challenge page, not data, so it isn't scriptable. Wikipedia's table parsed
+   cleanly and all 503 symbols were cross-checked against Alpaca's asset list:
+   every one is tradable and active, including the two dotted tickers `BRK.B`
+   and `BF.B`, with no reformatting needed. Implemented in
+   `src/vs2/data/sp500.py`, tested in `tests/test_sp500.py` against a real
+   trimmed fixture of the actual table markup.
 2. **Which data feed does this account have?** Determines whether `sip` is
    available or whether it is `iex`/`delayed_sip`. Does not affect a daily-close
    rule, but should be known rather than assumed.

@@ -88,7 +88,7 @@ a number a reader can check by hand against a price chart.
 | Parameter | Starting value | Note |
 |---|---|---|
 | Moving-average window | 50 trading days | The published convention. |
-| Universe | top 500 by trailing dollar volume, snapshotted to `config/universe.txt` and refreshed monthly | Computed from the same daily bars the rule reads, so it is reproducible without an external index source. |
+| Universe | the S&P 500, snapshotted to `config/universe.txt` and refreshed monthly from Wikipedia's constituent table (`src/vs2/data/sp500.py`) | Real index membership rather than a liquidity proxy for it. Verified 2026-08-07: all 503 parsed symbols, including the two dotted tickers `BRK.B`/`BF.B`, match a tradable, active Alpaca asset with no reformatting -- see `docs/API_MENU.md`. |
 | Maximum concurrent positions | 20 | Bounds how many crosses can be acted on. |
 | Position size | equal weight, full account across the position limit | Roughly 5% of equity each. No conviction sizing — conviction would be a second mechanism. |
 | Decision cadence | once per trading day | |
