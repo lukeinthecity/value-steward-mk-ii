@@ -15,18 +15,16 @@ at the current instant. value-steward's src/valuesteward/data/market_data.py
 already worked around this with a 16-minute buffer; that turns out to be a real
 constraint, not spare caution, so it is ported here rather than dropped.
 
-The retry/backoff behavior is ported near-verbatim from value-steward's
-src/valuesteward/data/alpaca_client.py -- see DESIGN.md's "Stack" section for
-why it is reused rather than rewritten.
+Retry/backoff lives in vs2.data.retry, shared with the calendar and broker
+clients -- see DESIGN.md's "Stack" section for why that layer is ported from
+value-steward rather than rewritten.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime, timedelta, timezone
-from functools import wraps
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from alpaca.data.enums import Adjustment, DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
@@ -34,47 +32,9 @@ from alpaca.data.models import Bar
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
+from vs2.data.retry import retry_alpaca
+
 logger = logging.getLogger(__name__)
-
-
-def retry_alpaca(retries: int = 3, backoff: float = 1.0) -> Callable:
-    """Retry on rate limits and transient server errors; re-raise everything else."""
-
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exc: Exception | None = None
-            for attempt in range(retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as exc:
-                    last_exc = exc
-                    msg = str(exc).lower()
-                    if (
-                        "429" in msg
-                        or "too many requests" in msg
-                        or "500" in msg
-                        or "502" in msg
-                    ):
-                        wait = backoff * (2**attempt)
-                        logger.warning(
-                            "[ALPACA] rate limit or server error, retrying in "
-                            "%ss (%d/%d): %s",
-                            wait,
-                            attempt + 1,
-                            retries,
-                            exc,
-                        )
-                        time.sleep(wait)
-                        continue
-                    raise
-            if last_exc is not None:
-                raise last_exc
-            raise RuntimeError("retry_alpaca exhausted without making an attempt")
-
-        return wrapper
-
-    return decorator
 
 
 class _BarsSource(Protocol):

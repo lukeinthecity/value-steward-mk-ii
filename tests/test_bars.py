@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from vs2.data.bars import BarsClient, retry_alpaca
+from vs2.data.bars import BarsClient
 
 
 @dataclass
@@ -96,40 +96,12 @@ class _FlakySource:
         return _Response({"AAPL": [_bar(5, 42.0)]})
 
 
-def test_retries_on_rate_limit_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("vs2.data.bars.time.sleep", lambda _seconds: None)
+def test_bars_fetch_is_wrapped_in_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Retry behavior itself is covered in test_retry.py; this only asserts that
+    # get_daily_bars is actually wrapped, which is easy to drop in a refactor.
+    monkeypatch.setattr("vs2.data.retry.time.sleep", lambda _seconds: None)
     source = _FlakySource(fail_times=2)
     result = BarsClient(source).get_daily_bars(["AAPL"], lookback_days=75)
 
     assert source.calls == 3
     assert result["AAPL"][0].close == 42.0
-
-
-def test_gives_up_after_exhausting_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("vs2.data.bars.time.sleep", lambda _seconds: None)
-    source = _FlakySource(fail_times=10)  # never succeeds within 3 default retries
-
-    with pytest.raises(RuntimeError, match="429"):
-        BarsClient(source).get_daily_bars(["AAPL"], lookback_days=75)
-    assert source.calls == 3
-
-
-def test_does_not_retry_non_transient_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("vs2.data.bars.time.sleep", lambda _seconds: None)
-    source = _FlakySource(fail_times=10, message="invalid api key")
-
-    with pytest.raises(RuntimeError, match="invalid api key"):
-        BarsClient(source).get_daily_bars(["AAPL"], lookback_days=75)
-    assert source.calls == 1  # no retry attempted
-
-
-def test_retry_decorator_exhausted_without_any_attempt_is_unreachable_in_practice() -> (
-    None
-):
-    # retries=0 is the only way to hit the "exhausted without an attempt" branch.
-    @retry_alpaca(retries=0)
-    def never_called() -> None:
-        raise AssertionError("should not run")
-
-    with pytest.raises(RuntimeError, match="exhausted without making an attempt"):
-        never_called()
