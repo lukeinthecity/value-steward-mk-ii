@@ -63,7 +63,7 @@ stack becomes the binding constraint without anyone choosing it.
 
 **For:** learning the relative weight of momentum, volatility, and drawdown rank.
 
-**What happened:** it was fitting three coefficients against roughly 130 unique
+**What happened:** it was fitting three coefficients against 104 unique
 decisions accumulated across all three runs (82 calendar days), and it fired on
 2 of 20 cycles because it kept failing its own minimum-sample check. The
 machinery was correct — the sample size for it never arrived, and never would

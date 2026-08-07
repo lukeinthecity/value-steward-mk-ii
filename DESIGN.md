@@ -152,11 +152,11 @@ mechanism.
 accumulated daily and still growing, contacting no broker. This is the direct
 input to the deferred gating mechanism above.
 
-**Not a trading dataset.** 214 scorecard rows across three runs, and run 3's
-include 4× duplication from four execution slots, so unique decisions number
-roughly 130 across those three runs (2026-05-18 to 2026-08-07, 82 calendar
-days). That is a set of worked examples to read, not
-a population to compute over. Any statistic from those rows has to be
+**Not a trading dataset.** 214 scorecard rows across three runs, inflated by
+duplication from four intraday execution slots. Keyed on `(symbol,
+entry_date)`, those collapse to **104 unique decisions** (29 / 45 / 30) across
+2026-05-18 to 2026-08-07, 82 calendar days. That is a set of worked examples to
+read, not a population to compute over. Any statistic from those rows has to be
 recomputed — the raw observations are sound, but the metrics built on them came
 from the measurement faults that ended runs 2 and 3.
 
