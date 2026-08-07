@@ -7,27 +7,32 @@ nothing else. It exists to answer a question the first system never answered in
 three runs: **does a simple, fully specified rule produce excess return over a
 benchmark, and can we measure that correctly?**
 
-Value Steward 1 remains live and unchanged. VS2 is a separate track, not a
-replacement.
+Value Steward 1 was retired from trading on 2026-08-07 after three runs. Its
+planned Run 4 was cancelled rather than started, on the grounds that it would
+have spent sixty trading days generating data from an instrument already judged
+untrustworthy. VS2 inherits its Alpaca paper account.
 
-## Account separation
+## Account
 
-**VS2 runs on its own Alpaca paper account, with its own API keys.** VS1 keeps
-the existing account. This is a requirement, not a preference.
+VS2 uses the existing Alpaca paper account, flat and fully in cash at handover:
+0 positions and $100,023.49 as of 2026-08-07, after VS1's positions were
+liquidated.
 
-Both systems read positions from the broker rather than from their own ledger —
-VS1 does so at `src/valuesteward/data/alpaca_client.py:128` via
-`get_all_positions()`. On a shared account each system would therefore treat the
-other's holdings as its own, with two concrete consequences:
+**Exactly one system may trade this account.** Both read positions from the
+broker rather than from their own ledger — VS1 does so at
+`src/valuesteward/data/alpaca_client.py:128` via `get_all_positions()` — so a
+second trading system on the same account would be read as this one's own
+holdings, and vice versa:
 
 - VS1's volatility stop iterates over account positions and would sell VS2's
   holdings.
 - VS1's `risk_exposure_pct` would include VS2's market value, read the account
   as fully deployed, and stop buying.
 
-The results of both runs would be uninterpretable. Alpaca supports multiple
-paper accounts under one login, each with separate keys, so the separation costs
-nothing beyond generating a second key pair.
+VS1 is held off the account by three independent measures: its trading cron jobs
+are removed, `trading_enabled` is false, and `force_no_trade` is true. Alpaca
+does support multiple paper accounts per login with separate keys, which is the
+route to take if VS1 is ever restarted rather than sharing this one.
 
 ## The rule
 
@@ -129,6 +134,30 @@ whether to act, never as a weight on a score, so its effect stays separable.
 
 Adding it before the baseline reads would repeat VS1's central mistake:
 introducing a second mechanism before the first one was measured.
+
+VS1's world-context pipeline stays running for exactly this reason. It contacts
+no broker, so it is unaffected by the trading retirement, and it continues to
+accumulate the dataset this mechanism will need.
+
+## What VS1 leaves behind
+
+Worth being precise about, because the two halves of its output have very
+different value.
+
+**The trading record is not a dataset.** 214 scorecard rows across three runs —
+56 from run 1, 83 from run 2, 75 from run 3 — and run 3's rows include 4×
+duplication from four intraday execution slots, so unique decisions number
+roughly 130 over fourteen months. Nothing can be trained or validated on that.
+It is useful as case studies: individual decisions that can be read end to end.
+
+Any statistic derived from those rows must be recomputed, not read off VS1's
+reports. The raw observations are sound; the metrics built on them came from the
+measurement faults that ended runs 2 and 3.
+
+**The world-context history is a dataset.** 929 context rows and 9,046 hydrated
+items, accumulated daily and still growing. It cost fourteen months to build,
+contacts no broker, and is the direct input to the deferred gating mechanism
+above.
 
 ## Stack
 
