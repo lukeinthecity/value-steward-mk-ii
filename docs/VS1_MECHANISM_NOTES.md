@@ -1,8 +1,9 @@
 # What VS1 taught about building mechanisms
 
-Value Steward 1 ran for fourteen months and three runs. It never produced a
-readable answer about whether its strategy worked, but it produced a detailed
-record of how each of its mechanisms was structured and how each one failed.
+Value Steward 1 ran for three runs, spanning 2026-05-18 to 2026-08-07 (82
+calendar days). It never produced a readable answer about whether its strategy
+worked, but it produced a detailed record of how each of its mechanisms was
+structured and how each one failed.
 That record is the reason to keep the repository.
 
 This file exists to be read **before adding any mechanism to VS2**, not as
@@ -49,9 +50,10 @@ alone. A mechanism that cannot be measured in isolation should not be added.
 **For:** filtering candidates before execution.
 
 **What happened:** seven gates were added over time. Exactly one was ever
-calibrated. The other six ran for fourteen months with no evidence that any of
-them improved anything, and collectively they starved the funnel to roughly 0.5
-candidates per day — which is itself why no mechanism downstream had sample size.
+calibrated. The other six ran across all three runs with no evidence that any
+of them improved anything, and collectively they starved the funnel to roughly
+0.5 candidates per day — which is itself why no mechanism downstream had sample
+size.
 
 **Rule for VS2:** count what a filter removes before deciding whether to keep it.
 Filters compound multiplicatively, so each additional one looks cheap and the
@@ -62,9 +64,10 @@ stack becomes the binding constraint without anyone choosing it.
 **For:** learning the relative weight of momentum, volatility, and drawdown rank.
 
 **What happened:** it was fitting three coefficients against roughly 130 unique
-decisions accumulated over fourteen months, and it fired on 2 of 20 cycles
-because it kept failing its own minimum-sample check. The machinery was
-correct — the sample size for it never arrived, and never would have at that
+decisions accumulated across all three runs (82 calendar days), and it fired on
+2 of 20 cycles because it kept failing its own minimum-sample check. The
+machinery was correct — the sample size for it never arrived, and never would
+have at that
 decision rate.
 
 **Rule for VS2:** before building a learner, state the sample size at which it

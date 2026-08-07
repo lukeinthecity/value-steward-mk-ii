@@ -154,7 +154,8 @@ input to the deferred gating mechanism above.
 
 **Not a trading dataset.** 214 scorecard rows across three runs, and run 3's
 include 4× duplication from four execution slots, so unique decisions number
-roughly 130 over fourteen months. That is a set of worked examples to read, not
+roughly 130 across those three runs (2026-05-18 to 2026-08-07, 82 calendar
+days). That is a set of worked examples to read, not
 a population to compute over. Any statistic from those rows has to be
 recomputed — the raw observations are sound, but the metrics built on them came
 from the measurement faults that ended runs 2 and 3.

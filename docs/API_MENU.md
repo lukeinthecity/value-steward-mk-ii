@@ -59,8 +59,8 @@ guaranteed false buy. **VS2 must pass `adjustment=all` explicitly on every bar
 request.**
 
 VS1 never set it, so it ranked momentum, volatility and drawdown on raw prices
-for fourteen months, and its 2-SD volatility stop would have read every split in
-the universe as a catastrophe.
+for its entire three-run history, and its 2-SD volatility stop would have read
+every split in the universe as a catastrophe.
 
 ### `feed` — where the prices come from
 

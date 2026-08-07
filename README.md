@@ -24,10 +24,11 @@ mechanisms from the first system: what each was for, what happened to it, and
 the structural rule that follows. It ends with a checklist to run before adding
 any mechanism here. It is the main reason the first repository is worth keeping.
 
-The first iteration was retired from trading on 2026-08-07 after three runs and
-fourteen months, having never produced a readable answer about whether its
-strategy worked. Its world-context pipeline still runs, because it contacts no
-broker and builds a dataset this system will need later.
+The first iteration was retired from trading on 2026-08-07 after three runs
+(2026-05-18 to 2026-08-07, 82 calendar days), having never produced a readable
+answer about whether its strategy worked. Its world-context pipeline still
+runs, because it contacts no broker and builds a dataset this system will need
+later.
 
 ## Status
 
