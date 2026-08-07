@@ -26,7 +26,7 @@ that was added to VS1 before the thing beneath it had been measured.
 | Three score nudges | Made attribution impossible. |
 | Correlation matrix | A performance limit became a strategy limit. |
 | Four intraday execution slots | Contaminated the measurement layer. |
-| Circuit breaker over sells | Capital protection that may invert. Unconfirmed. |
+| Circuit breaker and window guard over sells | Capital protection that inverts. Confirmed, and reachable at VS2's sizing. |
 | Volatility stop | Fails silently in the case it exists for. |
 | Market-open notice | Reported state it never read. |
 
@@ -146,22 +146,49 @@ implementation cost. Write down the reason next to the number. VS2's crossover
 rule needs no correlation matrix, which is why its universe can be sized by
 judgment instead.
 
-## 9. Circuit breaker over sells — unconfirmed
+## 9. Circuit breaker and window guard over sells — confirmed
 
-**For:** halting trading after a daily loss threshold.
+**For:** halting trading after a daily loss threshold, and confining execution to
+a window before the close.
 
-**What happened:** the daily-loss check and the execution-window guard appear to
-run before any distinction of order type, with no exemption for `SELL`,
-`VOL_STOP`, or `CAP_BREACH_SELL`. If that path is what stop intents actually
-take, then the protection that fires on a bad day is also what blocks the exit
-from a bad position.
+**What happened:** both gates block the volatility stop. Traced end to end on
+2026-08-07:
 
-**This was never confirmed.** Tracing whether stop intents actually reach that
-code path was still outstanding when VS1 was retired. It is recorded as a shape
-to watch for, not as a known defect.
+1. The vol-stop builds `IntentRecord(action_type="SELL",
+   reason_code="VOL_STOP")` — `decision_engine.py:683-699`.
+2. That intent reaches `execute_intent` through the single tick path —
+   `cli.py:516`.
+3. `execution_engine.py:242` applies the window guard to
+   `action_type in {"BUY", "SELL"}`. The window is 30 to 5 minutes before the
+   close, so a position cratering at 10:00 cannot be exited until 15:30.
+4. `execution_engine.py:258` applies the daily-loss circuit breaker with no
+   order-type distinction at all. Default threshold is 3%.
+
+The second one is the inversion. The circuit breaker fires when the account is
+down on the day, and the vol-stop fires when a position is down hard — **these
+are the same event.** The protection is most likely to be disabled exactly when
+it is most needed.
+
+**The code already knew the principle.** `execution_engine.py:365-375` exempts
+sells from the per-trade notional cap, with a comment reading: *"SELLs are
+risk-reducing (VOL\_STOP panic exits, CAP\_BREACH\_SELL, rebalance trims). They
+must NOT be throttled..."* The reasoning was correct and was applied to exactly
+one of the three gates.
+
+**Why it never bit VS1, and why it would bite VS2.** VS1 deployed at most $2,000
+against ~$100,000 of equity, so no single position could move the account 3% and
+the circuit-breaker half was unreachable. The window-guard half applied every
+day and simply went unnoticed, because the vol-stop rarely fired.
+
+VS2 plans 20 equal slots against the full account — roughly 5% each. One
+position halving is a 2.5% account move. **The defect becomes reachable at
+precisely the sizing VS2 has chosen.** Whatever exit mechanism VS2 eventually
+adds has to be built with this already in mind.
 
 **Rule for VS2:** risk-reducing actions are exempt from risk gates. A guard that
-can block an exit is not a guard.
+can block an exit is not a guard. And note that position sizing changes which
+latent defects are reachable — a bug that is unreachable at 2% deployment is not
+fixed, only hidden.
 
 ## 10. Volatility stop
 
@@ -220,9 +247,14 @@ measurement before the strategy for this reason.
    decision rate?
 4. Does it vote, or does it blend? Blending needs a specific justification.
 5. If it consumes a metric, has that metric been validated independently?
-6. If it can block an action, can it block a risk-reducing action? Fix that first.
+6. If it can block an action, can it block a risk-reducing action? Fix that
+   first — and check *every* gate, not the one that prompted the question.
+   VS1 exempted sells from one of three.
 7. If it can fail to evaluate, does it say so loudly?
 8. Are its fixtures built from real recorded rows?
-9. Is the mechanism beneath it already measured?
+9. At the position sizing actually in use, is this mechanism reachable? A defect
+   that cannot trigger at 2% deployment is hidden, not fixed, and VS2 deploys at
+   100%.
+10. Is the mechanism beneath it already measured?
 
-Question 9 is the one VS1 never asked.
+Question 10 is the one VS1 never asked.
