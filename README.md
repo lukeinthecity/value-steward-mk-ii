@@ -32,9 +32,10 @@ later.
 
 ## Status
 
-I/O layer built and verified against the live paper account: universe, daily
-bars, trading calendar, account equity, and positions. No decision logic and no
-order placement yet.
+I/O layer and decision logic built, both verified against the live paper
+account: universe, daily bars, trading calendar, account equity, positions, and
+50-day crossover detection. **No order placement** — nothing here can currently
+trade.
 
 ## Trading
 
