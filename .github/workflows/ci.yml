@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: none of these jobs write anything (tests, lint, secret
+# scan, dependency audit are all read-only checks).
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy credentials: the Alpaca SDK rejects empty keys at client
+      # construction; the test suite makes no network calls.
+      ALPACA_API_KEY_ID: ci-dummy
+      ALPACA_SECRET_KEY: ci-dummy
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m venv .venv
+      - run: .venv/bin/pip install -r requirements.txt -e .
+      - run: .venv/bin/python -m pytest tests/
+      - run: .venv/bin/python -m ruff check src/ tests/
+      - run: .venv/bin/python -m mypy src/
+      - run: .venv/bin/python -m bandit -r src/
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Belt-and-suspenders on top of .gitignore: fails if a live API key
+      # (Alpaca or otherwise) ever lands in a commit — scans full history on
+      # every push/PR, not just the current tree.
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  audit-py:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m venv .venv
+      # pip/setuptools are venv build tooling (not project deps) but pip-audit
+      # still flags them; keep them current so the audit reflects real
+      # application-dependency risk.
+      - run: .venv/bin/pip install --upgrade pip setuptools
+      - run: .venv/bin/pip install -r requirements.txt pip-audit
+      - run: .venv/bin/pip-audit

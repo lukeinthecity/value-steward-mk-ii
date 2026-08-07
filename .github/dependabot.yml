@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # GitHub Actions — batch all version bumps into a single weekly PR; action
+  # version bumps are low-risk and rarely need individual review.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Python dependencies. Group minor + patch into one PR; majors stay
+  # individual so breaking bumps get their own review. Security updates are
+  # unaffected (they keep opening promptly, on their own).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
