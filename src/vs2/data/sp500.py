@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 CONSTITUENTS_TABLE_ID = "constituents"
-USER_AGENT = "value-steward-2 research (contact: luke.shefski@gmail.com)"
+USER_AGENT = "value-steward-mk-ii research (contact: luke.shefski@gmail.com)"
 
 
 class _ConstituentsTableParser(HTMLParser):

@@ -1,4 +1,4 @@
-# Value Steward 2 — design
+# Value Steward mk II — design
 
 ## What this is
 
