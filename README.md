@@ -49,7 +49,10 @@ The crontab is installed (dry-run only — see `crontab` for the template).
 does not retry on failure (a write is not safe to retry blindly, unlike every
 read in this codebase), and a decision day's execution attempt — success,
 failure, or partial — is tracked separately from whether decisions were
-merely computed, so a failed order can't be silently treated as handled.
+merely computed, so a failed order can't be silently treated as handled. The
+whole daily cycle runs under a single-instance lock, so two overlapping cron
+ticks can't both proceed — verified against a genuinely separate OS process,
+not just a second attempt within one.
 
 ## Trading
 

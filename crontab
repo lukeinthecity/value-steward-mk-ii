@@ -9,11 +9,23 @@
 # per the exchange calendar in market_calendar.py) -- so the window opens
 # comfortably after the LATEST normal close (4pm ET) and checks every 15
 # minutes for 90 minutes, covering an early-close day's bar (published hours
-# earlier) just as well as a normal day's. run_daily.py's own once-per-day
-# guard (see last_logged_day in decision_log.py) makes every attempt after
-# the first a harmless no-op, so widening this window costs nothing --
-# exactly the wide-retry-window-plus-idempotent-guard pattern
-# value-steward's own EOD cron used, reused rather than reinvented.
+# earlier) just as well as a normal day's.
+#
+# This window means cron WILL start a second invocation before a slow first
+# one finishes, on some days -- that is the design, not a bug, and is exactly
+# why every attempt after the first has to be a genuinely harmless no-op, not
+# just usually one. Two mechanisms make that true together: run_daily.py's
+# once-per-day guard (last_logged_day / already_executed_today) answers "did
+# today already happen", and a single-instance file lock (run_lock.py)
+# answers "is another attempt in flight right now" -- the guard alone was not
+# enough, since there is a real gap between checking it and the write that
+# would make it answer differently, which is exactly the gap two overlapping
+# cron ticks can land in. This is the wide-retry-window-plus-idempotent-guard
+# pattern value-steward's own EOD cron used, with the added lock this
+# codebase's own history showed the pattern needs once it governs real
+# orders rather than a read-only pipeline -- see
+# docs/CODE_CHECK_PLAYBOOK.md's "Known open findings" (resolved 2026-08-08)
+# for the incident this closes.
 #
 # Local system clock is assumed to read US Eastern time directly, matching
 # value-steward's own crontab convention there -- confirm this holds before

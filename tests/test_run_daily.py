@@ -17,6 +17,7 @@ from vs2.data.broker import BrokerClient
 from vs2.data.decision_log import last_logged_day
 from vs2.data.market_calendar import MarketCalendar
 from vs2.data.orders import OrderClient
+from vs2.data.run_lock import single_instance
 from vs2.run_daily import run
 
 
@@ -129,8 +130,12 @@ def _harness(
 TODAY = date(2026, 8, 10)
 
 
-def _paths(tmp_path: Path) -> tuple[Path, Path]:
-    return tmp_path / "decisions.jsonl", tmp_path / "executions.jsonl"
+def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:
+    return (
+        tmp_path / "decisions.jsonl",
+        tmp_path / "executions.jsonl",
+        tmp_path / "run_daily.lock",
+    )
 
 
 def test_non_trading_day_does_nothing(tmp_path: Path) -> None:
@@ -140,10 +145,11 @@ def test_non_trading_day_does_nothing(tmp_path: Path) -> None:
         positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     result = run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, today=TODAY
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
     )
 
     assert result.trading_day is False
@@ -159,10 +165,11 @@ def test_trading_day_computes_and_logs_decisions(tmp_path: Path) -> None:
         positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},  # 10 -> 50 is a clean cross up
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     result = run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, today=TODAY
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
     )
 
     assert result.trading_day is True
@@ -179,9 +186,12 @@ def test_dry_run_never_calls_submit_order(tmp_path: Path) -> None:
         positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
-    run(calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, today=TODAY)
+    run(
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
+    )
 
     assert trading.submitted == []
 
@@ -193,7 +203,7 @@ def test_execute_submits_order_bearing_decisions(tmp_path: Path) -> None:
         positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     result = run(
         calendar,
@@ -202,7 +212,7 @@ def test_execute_submits_order_bearing_decisions(tmp_path: Path) -> None:
         orders,
         ["AAPL"],
         log_path,
-        exec_log_path,
+        exec_log_path, lock_path,
         execute=True,
         today=TODAY,
     )
@@ -221,10 +231,10 @@ def test_execute_with_no_order_bearing_decisions_submits_nothing(tmp_path: Path)
         positions=[],
         bars={"AAPL": bars_51(TODAY, 5.0)},  # 10 -> 5, no cross up, nothing held
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
 
@@ -238,13 +248,15 @@ def test_second_call_same_decision_day_is_a_noop_without_force(tmp_path: Path) -
         positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     first = run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, today=TODAY
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
     )
     second = run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, today=TODAY
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
     )
 
     assert first.already_ran is False
@@ -261,11 +273,14 @@ def test_force_reruns_even_when_already_logged(tmp_path: Path) -> None:
         positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
-    run(calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, today=TODAY)
-    second = run(
+    run(
         calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
+    )
+    second = run(
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, lock_path,
         force=True, today=TODAY,
     )
 
@@ -283,10 +298,10 @@ def test_held_position_sells_on_cross_down(tmp_path: Path) -> None:
         positions=[FakePosition("AAPL", qty="10", market_value="500", avg_entry_price="50")],
         bars={"AAPL": bars_51(TODAY, 5.0)},  # held, but this cross series is a cross DOWN
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     result = run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
 
@@ -303,11 +318,14 @@ def test_dry_run_then_execute_same_day_is_not_blocked_by_the_dry_run(tmp_path: P
         trading_days=[TODAY], equity="100000", positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
-    run(calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, today=TODAY)
-    executed = run(
+    run(
         calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
+    )
+    executed = run(
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
 
@@ -320,14 +338,14 @@ def test_second_execute_call_same_day_is_a_noop_without_force(tmp_path: Path) ->
         trading_days=[TODAY], equity="100000", positions=[],
         bars={"AAPL": bars_51(TODAY, 50.0)},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     first = run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
     second = run(
-        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
 
@@ -348,10 +366,10 @@ def test_partial_execution_failure_does_not_stop_remaining_orders(tmp_path: Path
         },
         fail_symbols={"BAD"},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     result = run(
-        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
 
@@ -373,14 +391,14 @@ def test_partial_execution_failure_still_counts_as_attempted_for_the_guard(
         bars={"GOOD": bars_51(TODAY, 50.0), "BAD": bars_51(TODAY, 50.0)},
         fail_symbols={"BAD"},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     first = run(
-        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
     second = run(
-        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
 
@@ -396,14 +414,14 @@ def test_force_retries_after_a_partial_failure(tmp_path: Path) -> None:
         bars={"GOOD": bars_51(TODAY, 50.0), "BAD": bars_51(TODAY, 50.0)},
         fail_symbols={"BAD"},
     )
-    log_path, exec_log_path = _paths(tmp_path)
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
 
     run(
-        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path, lock_path,
         execute=True, today=TODAY,
     )
     second = run(
-        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path,
+        calendar, broker, bars_client, orders, ["GOOD", "BAD"], log_path, exec_log_path, lock_path,
         execute=True, force=True, today=TODAY,
     )
 
@@ -412,3 +430,91 @@ def test_force_retries_after_a_partial_failure(tmp_path: Path) -> None:
     # is exactly why this requires a human to explicitly opt in rather than
     # happening automatically: GOOD already succeeded once.
     assert len(trading.submitted) == 4
+
+
+# --- concurrent invocations: the lock, not the guard, prevents the race -----
+
+
+def test_run_returns_already_running_when_the_lock_is_already_held(
+    tmp_path: Path,
+) -> None:
+    # Simulates the actual failure mode this closes: a second cron tick
+    # firing while a first invocation is still in flight. Pre-acquiring the
+    # lock here stands in for "another process already has it".
+    trading, calendar, broker, bars_client, orders = _harness(
+        trading_days=[TODAY], equity="100000", positions=[],
+        bars={"AAPL": bars_51(TODAY, 50.0)},
+    )
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
+
+    with single_instance(lock_path):
+        result = run(
+            calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+            lock_path, today=TODAY,
+        )
+
+    assert result.already_running is True
+    assert result.trading_day is False
+    assert result.decisions == []
+    # Nothing was fetched or submitted -- the lock check happens before any
+    # of that, not after.
+    assert trading.submitted == []
+    assert not log_path.exists()
+
+
+def test_run_succeeds_normally_once_the_lock_is_free_again(tmp_path: Path) -> None:
+    trading, calendar, broker, bars_client, orders = _harness(
+        trading_days=[TODAY], equity="100000", positions=[],
+        bars={"AAPL": bars_51(TODAY, 50.0)},
+    )
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
+
+    with single_instance(lock_path):
+        pass  # acquired and released -- simulates a prior run finishing
+
+    result = run(
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
+    )
+
+    assert result.already_running is False
+    assert result.trading_day is True
+    assert len(result.decisions) == 1
+
+
+def test_already_running_is_false_on_the_ordinary_happy_path(tmp_path: Path) -> None:
+    trading, calendar, broker, bars_client, orders = _harness(
+        trading_days=[TODAY], equity="100000", positions=[],
+        bars={"AAPL": bars_51(TODAY, 50.0)},
+    )
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
+
+    result = run(
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
+    )
+
+    assert result.already_running is False
+
+
+def test_lock_is_released_after_a_normal_run_so_the_next_one_can_proceed(
+    tmp_path: Path,
+) -> None:
+    # If run() ever failed to release the lock on its own successful exit,
+    # this second call would incorrectly see already_running=True.
+    trading, calendar, broker, bars_client, orders = _harness(
+        trading_days=[TODAY], equity="100000", positions=[],
+        bars={"AAPL": bars_51(TODAY, 5.0)},  # no cross, nothing held -- a quiet day
+    )
+    log_path, exec_log_path, lock_path = _paths(tmp_path)
+
+    run(
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, today=TODAY,
+    )
+    second = run(
+        calendar, broker, bars_client, orders, ["AAPL"], log_path, exec_log_path,
+        lock_path, force=True, today=TODAY,
+    )
+
+    assert second.already_running is False
