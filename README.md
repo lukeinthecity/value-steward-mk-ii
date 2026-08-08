@@ -69,6 +69,26 @@ Four append-only logs under `data/` are what the run is measured from:
 `fills.jsonl` (what it became, and realized slippage), and `sessions.jsonl`
 (equity and exposure per session, plus any session that was skipped and why).
 
+## Notifications
+
+Two push notifications per trading day, via [ntfy](https://ntfy.sh) — an
+"open" one on the first in-session tick, and a "close" one once the day is
+decided. Order failures, missed sessions and stale bars lead the message and
+raise its priority, because the part you would act on should be the part you
+read first.
+
+Configured with the **same environment variables value-steward uses**
+(`VS_NTFY_TOPIC`, `VS_NTFY_SERVER`, `VS_NTFY_TOKEN`, `VS_PUSH_ENABLED`), so the
+`.env` copied across for the Alpaca credentials points both systems at one
+topic and one phone subscription. Unset `VS_NTFY_TOPIC` and pushes are simply
+off — not an error. The topic is a secret and lives only in the gitignored
+`.env`; it is never logged, never in an error message, and never committed.
+
+A push is observability, never a control-path step: sending cannot raise, so a
+dead notification channel can never affect a cycle that is about to place
+orders. Every attempt is recorded in `data/pushes.jsonl`, because you cannot
+rely on the alert channel to tell you the alert channel is broken.
+
 ## Trading
 
 Alpaca **paper** account only.

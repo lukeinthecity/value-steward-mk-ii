@@ -37,6 +37,11 @@ Recomputing the next morning would read a portfolio that morning's own sells
 had already changed, and would silently produce different orders from the ones
 on record.
 
+Two pushes go out per trading day, on the same ntfy topic value-steward uses:
+an "open" one on the first in-session tick, and a "close" one once the day is
+decided. Both are best-effort and deduplicated -- see push.py. A notification
+failure can never affect the cycle.
+
 Two different questions get two different guards. Dry-run mode asks "did I
 already compute this session's decisions" (decision_log.py) -- repeating that
 is harmless, so it only prevents redundant log rows. `--execute` mode asks "did
@@ -75,7 +80,7 @@ from vs2.core.crossover import bar_day as _bar_day
 from vs2.core.crossover import detect_crosses
 from vs2.core.decision import Decision, build_decisions
 from vs2.data.bars import BarsClient, create_bars_client
-from vs2.data.broker import BrokerClient
+from vs2.data.broker import AccountState, BrokerClient, Holding
 from vs2.data.decision_log import append_decisions, load_decisions
 from vs2.data.execution_log import (
     already_executed_today,
@@ -85,6 +90,15 @@ from vs2.data.execution_log import (
 from vs2.data.fills import FillReader, append_fills, reconciled_ids
 from vs2.data.market_calendar import MarketCalendar
 from vs2.data.orders import OrderClient, SubmissionResult
+from vs2.data.push import (
+    PushConfig,
+    close_message,
+    load_push_config,
+    maybe_push,
+    open_message,
+    push_priority,
+    push_tags,
+)
 from vs2.data.run_lock import AlreadyRunningError, single_instance
 from vs2.data.session_log import append_session, build_record, last_decided_day
 
@@ -96,10 +110,10 @@ DEFAULT_LOOKBACK_DAYS = 110  # >> the 51 bars the rule needs, to absorb gaps
 
 @dataclass(frozen=True)
 class LogPaths:
-    """Where the four append-only records live.
+    """Where the append-only records live.
 
     Grouped into one object because `run()` needs all of them and threading
-    four separate Path arguments through every call site made the signature
+    five separate Path arguments through every call site made the signature
     harder to read than the thing it describes.
     """
 
@@ -107,6 +121,7 @@ class LogPaths:
     executions: Path
     sessions: Path
     fills: Path
+    pushes: Path
     lock: Path
 
     @classmethod
@@ -116,6 +131,7 @@ class LogPaths:
             executions=root / "executions.jsonl",
             sessions=root / "sessions.jsonl",
             fills=root / "fills.jsonl",
+            pushes=root / "pushes.jsonl",
             lock=root / "run_daily.lock",
         )
 
@@ -147,6 +163,7 @@ def run(
     paths: LogPaths,
     *,
     fill_reader: FillReader | None = None,
+    push_config: PushConfig | None = None,
     slots: int = DEFAULT_SLOTS,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     execute: bool = False,
@@ -181,6 +198,7 @@ def run(
                 universe,
                 paths,
                 fill_reader=fill_reader,
+                push_config=push_config,
                 slots=slots,
                 lookback_days=lookback_days,
                 execute=execute,
@@ -241,6 +259,15 @@ def _trim_to_session(
     return trimmed, newest
 
 
+def _invested_fraction(account: AccountState, holdings: list[Holding]) -> float | None:
+    """Share of equity in positions, for the push messages. None, not zero,
+    when equity is unknown -- the same distinction session_log.py draws."""
+
+    if not account.equity:
+        return None
+    return sum(holding.market_value for holding in holdings) / account.equity
+
+
 def _reconcile(
     fill_reader: FillReader | None, paths: LogPaths
 ) -> int:
@@ -268,6 +295,7 @@ def _run_locked(
     paths: LogPaths,
     *,
     fill_reader: FillReader | None,
+    push_config: PushConfig | None,
     slots: int,
     lookback_days: int,
     execute: bool,
@@ -319,6 +347,14 @@ def _run_locked(
                     bars_as_of=bars_as_of,
                 ),
                 paths.sessions,
+            )
+            title, body = close_message(
+                decision_day, {}, account.equity,
+                _invested_fraction(account, holding_list), stale=True,
+            )
+            maybe_push(
+                push_config, paths.pushes, decision_day, "close", title, body,
+                priority=push_priority(stale=True), tags=push_tags(stale=True),
             )
             return RunResult(
                 decision_day,
@@ -373,6 +409,30 @@ def _run_locked(
             ),
             paths.sessions,
         )
+
+        # The "closing" push: today's close is decided. Sent on a dry run too --
+        # during the arming week the notification is the whole point, and a
+        # channel first exercised once real money moves is one nobody tested.
+        by_action: dict[str, int] = {}
+        for decision in decisions:
+            by_action[decision.action] = by_action.get(decision.action, 0) + 1
+        title, body = close_message(
+            decision_day,
+            by_action,
+            account.equity,
+            _invested_fraction(account, holding_list),
+            missed_sessions=missed,
+        )
+        maybe_push(
+            push_config,
+            paths.pushes,
+            decision_day,
+            "close",
+            title,
+            body,
+            priority=push_priority(missed_sessions=missed),
+            tags=push_tags(missed_sessions=missed),
+        )
     else:
         missed = 0
         logger.info("%s already decided; %d decisions on record", decision_day, len(existing))
@@ -384,6 +444,23 @@ def _run_locked(
             decision_day,
             len(declined_for_cash),
             ", ".join(declined_for_cash),
+        )
+
+    # The "opening" push: the market is open and this is what today holds.
+    # Fires on the first in-session tick whether or not --execute is set, so
+    # the channel is exercised during the dry-run week rather than first tried
+    # on the day real orders depend on it.
+    if market_open:
+        pending = 0 if already_executed_today(paths.executions, decision_day) else sum(
+            1 for d in decisions if d.is_order
+        )
+        title, body = open_message(
+            decision_day, pending, account.equity,
+            _invested_fraction(account, holding_list),
+        )
+        maybe_push(
+            push_config, paths.pushes, decision_day, "open", title, body,
+            priority=3, tags=("rocket",),
         )
 
     submitted: list[SubmissionResult] = []
@@ -496,6 +573,7 @@ def main() -> None:
         universe=universe,
         paths=paths,
         fill_reader=FillReader(trading_client),
+        push_config=load_push_config(os.environ),
         execute=args.execute,
         force=args.force,
     )

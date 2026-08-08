@@ -19,6 +19,7 @@ UTC-aware fixtures here would test a shape the broker never produces.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -29,6 +30,7 @@ from vs2.data.broker import BrokerClient
 from vs2.data.decision_log import last_logged_day, load_decisions
 from vs2.data.market_calendar import MarketCalendar
 from vs2.data.orders import OrderClient
+from vs2.data.push import PushConfig
 from vs2.data.run_lock import single_instance
 from vs2.data.session_log import load_sessions
 from vs2.run_daily import LogPaths, run
@@ -115,6 +117,26 @@ class FakeBarsSource:
                 self.data = data
 
         return _Response(self._data)
+
+
+@contextlib.contextmanager
+def _transport(fake):
+    """Swap push.py's default HTTP transport for a fake.
+
+    run() takes the push config as a parameter but not the transport -- the
+    transport is an implementation detail of push.py, and threading it through
+    the whole call chain purely for tests would be the test dictating the
+    production signature.
+    """
+
+    import vs2.data.push as push_module
+
+    original = push_module._urllib_transport
+    push_module._urllib_transport = fake
+    try:
+        yield
+    finally:
+        push_module._urllib_transport = original
 
 
 DECISION_DAY = date(2026, 8, 10)  # Monday
@@ -641,3 +663,110 @@ def test_lock_is_released_after_a_normal_run_so_the_next_one_can_proceed(
     second = run(**kwargs, paths=paths, force=True, now=AFTER_CLOSE)
 
     assert second.already_running is False
+
+
+# --- push notifications ------------------------------------------------------
+#
+# Two per trading day on value-steward's own ntfy topic. The property that
+# matters most is the last one: a dead notification channel must never affect
+# a cycle that is about to place orders.
+
+
+class RecordingTransport:
+    def __init__(self, raises: Exception | None = None) -> None:
+        self.raises = raises
+        self.sent: list[tuple[str, str]] = []
+
+    def __call__(self, url: str, body: bytes, headers) -> int:
+        self.sent.append((headers.get("Title", ""), body.decode()))
+        if self.raises is not None:
+            raise self.raises
+        return 200
+
+
+PUSH = PushConfig(server="https://ntfy.example", topic="topic", token=None)
+
+
+def test_deciding_sends_the_closing_push(tmp_path: Path) -> None:
+    trading, kwargs, paths = _standard(tmp_path)
+    transport = RecordingTransport()
+
+    with _transport(transport):
+        run(**kwargs, paths=paths, push_config=PUSH, now=AFTER_CLOSE)
+
+    assert len(transport.sent) == 1
+    title, body = transport.sent[0]
+    assert "VS2 done" in title
+    assert "1 buy" in body
+
+
+def test_the_opening_push_fires_in_session(tmp_path: Path) -> None:
+    trading, kwargs, paths = _standard(tmp_path)
+    transport = RecordingTransport()
+
+    with _transport(transport):
+        run(**kwargs, paths=paths, execute=True, push_config=PUSH, now=IN_SESSION)
+
+    titles = [t for t, _ in transport.sent]
+    assert any("VS2 live" in t for t in titles)
+
+
+def test_each_push_goes_out_once_across_a_whole_day_of_ticks(
+    tmp_path: Path,
+) -> None:
+    trading, kwargs, paths = _standard(tmp_path)
+    transport = RecordingTransport()
+
+    with _transport(transport):
+        for hour in (10, 11, 13, 15):
+            run(**kwargs, paths=paths, execute=True, push_config=PUSH,
+                now=datetime(2026, 8, 11, hour, 0))
+        for minute in (15, 30, 45):
+            run(**kwargs, paths=paths, execute=True, push_config=PUSH,
+                now=datetime(2026, 8, 11, 16, minute))
+
+    titles = [t for t, _ in transport.sent]
+    assert sum(1 for t in titles if "VS2 live" in t) == 1
+    assert sum(1 for t in titles if "VS2 done" in t) == 1
+
+
+def test_stale_bars_push_says_nothing_was_traded(tmp_path: Path) -> None:
+    stale_day = date(2026, 8, 7)
+    trading, calendar, broker, bars_client, orders = _harness(
+        trading_days=[stale_day] + TRADING_DAYS, equity="100000", positions=[],
+        bars={"AAPL": bars_51(stale_day, 50.0)},
+    )
+    paths = LogPaths.under(tmp_path)
+    transport = RecordingTransport()
+
+    with _transport(transport):
+        run(calendar, broker, bars_client, orders, ["AAPL"], paths,
+            execute=True, push_config=PUSH, now=IN_SESSION)
+
+    assert any("STALE BARS" in t for t, _ in transport.sent)
+
+
+def test_a_broken_push_channel_does_not_stop_the_cycle(tmp_path: Path) -> None:
+    """The whole reason send_push swallows everything."""
+
+    trading, kwargs, paths = _standard(tmp_path)
+    transport = RecordingTransport(raises=RuntimeError("ntfy is down"))
+
+    with _transport(transport):
+        result = run(**kwargs, paths=paths, execute=True, push_config=PUSH,
+                     now=IN_SESSION)
+
+    assert result.decided is True
+    assert result.executed is True
+    assert len(trading.submitted) == 1
+
+
+def test_no_push_config_is_a_normal_cycle_with_no_notifications(
+    tmp_path: Path,
+) -> None:
+    trading, kwargs, paths = _standard(tmp_path)
+
+    result = run(**kwargs, paths=paths, execute=True, now=IN_SESSION)
+
+    assert result.executed is True
+    assert not paths.pushes.exists()

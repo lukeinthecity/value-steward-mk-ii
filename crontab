@@ -51,9 +51,17 @@
 #    broker's calendar in Eastern and refuses an unfinished session), but the
 #    schedule would be pointless. Convert the times if the clock is not ET.
 #
-# 2. MAILTO. Set it to a real address. run_daily exits non-zero when an order
-#    fails, and that exit code is the cheap half of "alert me" — but only if
-#    something is listening. Without MAILTO the failure is silent.
+# 2. NOTIFICATIONS. Two channels, and they cover different things.
+#
+#    Push (ntfy) is the primary one: two notifications a trading day, on the
+#    same topic value-steward uses. It needs VS_NTFY_TOPIC in .env — with it
+#    unset, pushes are silently off, which is fine for a dev box and wrong
+#    for the run. Check .env before arming.
+#
+#    MAILTO is the backstop, and catches what a push cannot: run_daily exits
+#    non-zero on a failed order or a missed session, and cron mails the
+#    output — including a Python traceback, which is the one failure mode a
+#    push written in that same process can never report on itself.
 #
 MAILTO=you@example.com
 

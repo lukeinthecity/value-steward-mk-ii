@@ -49,7 +49,13 @@ since the beginning — keep it consistent.
   ```
 - **`.env` is local and gitignored, not committed.** It holds the same Alpaca
   paper credentials VS1 uses (same account — see "Exactly one system may
-  trade this account" in `DESIGN.md`). If it's ever missing, `main()` in
+  trade this account" in `DESIGN.md`), and the same ntfy push settings
+  (`VS_NTFY_TOPIC`, `VS_NTFY_SERVER`, `VS_NTFY_TOKEN`, `VS_PUSH_ENABLED`) —
+  the variable names are deliberately identical to VS1's so one copied `.env`
+  configures both. **The ntfy topic is a secret**: anyone holding it can read
+  and publish to it. Never log it, never put it in a commit, an error message
+  or a doc, and never hardcode a server other than the public
+  `https://ntfy.sh` default. If it's ever missing, `main()` in
   `run_daily.py` calls bare `load_dotenv()`, which searches upward from the
   working directory and will **not** find VS1's `.env` (a sibling directory,
   not an ancestor) — it will crash on `os.environ["ALPACA_API_KEY_ID"]`
