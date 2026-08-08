@@ -41,7 +41,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vs2.data.orders import SubmissionResult
+from vs2.data.orders import SubmissionResult, client_order_id
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +73,45 @@ def _build_rows(results: list[SubmissionResult], day: date) -> list[dict[str, An
             "qty": result.decision.qty,
             "succeeded": result.succeeded,
             "order_id": _order_id(result.order),
+            # The deterministic key reconciliation looks the fill up by, and
+            # the close it will be measured against. Both are written at
+            # submission time because neither can be recovered later: the
+            # decision row may be superseded by a --force re-run, and matching
+            # a fill back by symbol and timestamp alone is guesswork.
+            "client_order_id": client_order_id(result.decision),
+            "decision_close": result.decision.close,
             "error": result.error,
             "logged_at": logged_at,
         }
         for result in results
     ]
+
+
+def pending_submissions(
+    path: Path, already_reconciled: set[str]
+) -> list[dict[str, Any]]:
+    """Successful submissions whose outcome is not yet recorded as terminal.
+
+    Failed submissions are skipped: an order that was never accepted has no
+    fill to find, and asking the broker about it would only produce noise.
+    """
+
+    if not path.exists():
+        return []
+    pending: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            client_id = row.get("client_order_id")
+            if not row.get("succeeded") or not client_id:
+                continue
+            if client_id in already_reconciled:
+                continue
+            pending.append(row)
+    return pending
 
 
 def append_execution_results(

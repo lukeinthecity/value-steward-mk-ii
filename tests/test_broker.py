@@ -19,6 +19,9 @@ from vs2.data.broker import BrokerClient, Holding, MissingAccountFieldError
 @dataclass
 class FakeAccount:
     equity: str | None
+    # Defaulted so the equity-focused cases below stay about equity. The
+    # cash-specific cases set it explicitly.
+    cash: str | None = "0"
 
 
 @dataclass
@@ -125,3 +128,31 @@ def test_fractional_quantities_survive() -> None:
     )
     holdings = BrokerClient(source).get_holdings()
     assert holdings[0].qty == pytest.approx(0.017099767)
+
+
+# --- cash, the ceiling on what a day's buys can spend -------------------------
+
+
+def test_account_state_reads_equity_and_cash_in_one_call() -> None:
+    source = FakeBrokerSource(FakeAccount(equity="100023.49", cash="30000.00"))
+    state = BrokerClient(source).get_account_state()
+
+    assert state.equity == pytest.approx(100023.49)
+    assert state.cash == pytest.approx(30000.00)
+
+
+def test_missing_cash_raises_rather_than_defaulting_to_zero() -> None:
+    """Silently reading absent cash as zero would decline every buy and look
+    exactly like a quiet market -- the same reasoning as equity."""
+
+    source = FakeBrokerSource(FakeAccount(equity="100000", cash=None))
+    with pytest.raises(MissingAccountFieldError, match="'cash'"):
+        BrokerClient(source).get_account_state()
+
+
+def test_negative_cash_is_reported_faithfully_not_clamped() -> None:
+    """A margin debit is a real state. Clamping here would hide it; the
+    decision layer is where it stops being spending power."""
+
+    source = FakeBrokerSource(FakeAccount(equity="100000", cash="-5000"))
+    assert BrokerClient(source).get_account_state().cash == pytest.approx(-5000.0)

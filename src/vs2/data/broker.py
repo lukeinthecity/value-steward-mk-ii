@@ -35,6 +35,21 @@ class Holding:
     avg_entry_price: float
 
 
+@dataclass(frozen=True)
+class AccountState:
+    """The account's money, read in one call.
+
+    `cash` is settled cash, deliberately *not* `buying_power`. On a margin
+    account -- which an Alpaca paper account is by default -- buying_power
+    includes borrowed money, and sizing against it would quietly run the test
+    on leverage. DESIGN.md's sizing is equal weight of the account's own
+    equity, so cash is the honest ceiling on what a day's buys can spend.
+    """
+
+    equity: float
+    cash: float
+
+
 def _required_float(value: Any, field: str) -> float:
     """Convert an Alpaca string field to float, refusing to invent a default."""
 
@@ -61,11 +76,24 @@ class BrokerClient:
         self._trading_client = trading_client
 
     @retry_alpaca()
+    def get_account_state(self) -> AccountState:
+        """Equity and settled cash in a single call.
+
+        One call rather than two, because a day's sizing has to reason about
+        both together and reading them from separate round trips would let
+        them disagree.
+        """
+
+        account = self._trading_client.get_account()
+        return AccountState(
+            equity=_required_float(getattr(account, "equity", None), "equity"),
+            cash=_required_float(getattr(account, "cash", None), "cash"),
+        )
+
     def get_equity(self) -> float:
         """Total account value: cash plus the market value of every position."""
 
-        account = self._trading_client.get_account()
-        return _required_float(getattr(account, "equity", None), "equity")
+        return self.get_account_state().equity
 
     @retry_alpaca()
     def get_holdings(self) -> list[Holding]:
