@@ -32,10 +32,13 @@ later.
 
 ## Status
 
-I/O layer and decision logic built, both verified against the live paper
-account: universe, daily bars, trading calendar, account equity, positions, and
-50-day crossover detection. **No order placement** — nothing here can currently
-trade.
+The full pipeline is built and verified against the live paper account:
+universe, daily bars, trading calendar, account equity, positions, 50-day
+crossover detection, decision-making, and order submission. `python -m
+vs2.run_daily` computes and logs every day's decisions; add `--execute` to
+actually submit orders. **`--execute` has never been passed against this
+account.** A crontab template exists (`crontab`) but is not installed
+anywhere — nothing here trades unattended yet.
 
 ## Trading
 
