@@ -521,17 +521,27 @@ def main() -> None:
                 decision.reason_code,
             )
 
-    if result.executed:
-        failed = [r for r in result.submitted if not r.succeeded]
-        if failed:
-            # Non-zero exit is the cheap, dependency-free half of "alert on
-            # failure" -- it gives cron's own MAILTO or any external monitor
-            # something to key off without this project taking on a
-            # notification service as a new dependency. The other half is the
-            # ERROR-level log line already written inside run().
-            import sys
+    # Non-zero exit is the cheap, dependency-free half of "alert on failure" --
+    # it gives cron's own MAILTO or any external monitor something to key off
+    # without this project taking on a notification service as a new
+    # dependency. The other half is the ERROR-level log line already written
+    # inside run().
+    #
+    # A missed session qualifies. It fires exactly once, on the day the gap is
+    # noticed, and it means the measurement now covers fewer sessions than its
+    # date range implies -- which is the sort of thing that should reach a
+    # human during the run rather than at the Day-60 review.
+    #
+    # A stale-bar day deliberately does NOT exit non-zero: at 16:15 the daily
+    # bar is often simply not published yet, and the later ticks in the same
+    # window are expected to resolve it. Alerting on the transient case would
+    # train the reader to ignore the alert. Persistent staleness surfaces as a
+    # missed session the next day, and in the report's own caveats.
+    failed = [r for r in result.submitted if not r.succeeded] if result.executed else []
+    if failed or result.missed_sessions:
+        import sys
 
-            sys.exit(1)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
