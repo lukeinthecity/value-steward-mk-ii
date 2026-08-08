@@ -1,9 +1,11 @@
-"""Tests for the S&P 500 constituent parser and universe writer.
+"""Tests for the index constituent parser and universe writer.
 
-fixture_sp500_table.html is a real trimmed slice of Wikipedia's constituents
-table (header + 4 real data rows, including both dotted tickers BRK.B and
-BF.B), not hand-written idealized markup -- see sp500.py's module docstring
-for why that distinction matters here.
+Both fixtures are real trimmed slices of Wikipedia markup, not hand-written
+idealized HTML -- see index_membership.py's module docstring for why that
+distinction matters here. fixture_sp500_table.html carries the header plus four
+real rows including both dotted tickers (BRK.B, BF.B);
+fixture_dow_table.html carries the header plus three rows from the Dow page,
+which is the configured universe.
 """
 
 from __future__ import annotations
@@ -12,13 +14,18 @@ from pathlib import Path
 
 import pytest
 
-from vs2.data.sp500 import parse_constituents, write_universe
+from vs2.data.index_membership import parse_constituents, write_universe
 
 FIXTURE_PATH = Path(__file__).parent / "fixture_sp500_table.html"
+DOW_FIXTURE_PATH = Path(__file__).parent / "fixture_dow_table.html"
 
 
 def _load_fixture() -> str:
     return FIXTURE_PATH.read_text(encoding="utf-8")
+
+
+def _load_dow_fixture() -> str:
+    return DOW_FIXTURE_PATH.read_text(encoding="utf-8")
 
 
 def test_parses_real_fixture_rows() -> None:
@@ -62,6 +69,25 @@ def test_write_universe_writes_one_symbol_per_line(tmp_path: Path) -> None:
     path = tmp_path / "config" / "universe.txt"
     write_universe(["MMM", "AOS", "BRK.B"], path)
     assert path.read_text(encoding="utf-8") == "MMM\nAOS\nBRK.B\n"
+
+
+def test_same_parser_handles_the_dow_page() -> None:
+    # The Dow is the configured universe, so its page must keep parsing. Both
+    # Wikipedia pages expose id="constituents" with a Symbol column, which is
+    # why one parser serves both -- verified here rather than assumed.
+    assert parse_constituents(_load_dow_fixture(), min_expected=3) == [
+        "AAPL",
+        "MSFT",
+        "NVDA",
+    ]
+
+
+def test_dow_default_min_expected_rejects_a_truncated_page() -> None:
+    # The configured default (25) must reject a 3-row fixture, so a Wikipedia
+    # restructure that silently drops rows fails loudly instead of shrinking
+    # the tradable universe.
+    with pytest.raises(ValueError, match="parsed only"):
+        parse_constituents(_load_dow_fixture())
 
 
 def test_write_universe_creates_parent_dir(tmp_path: Path) -> None:

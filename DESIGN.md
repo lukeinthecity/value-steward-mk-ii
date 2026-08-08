@@ -88,7 +88,7 @@ a number a reader can check by hand against a price chart.
 | Parameter | Starting value | Note |
 |---|---|---|
 | Moving-average window | 50 trading days | The published convention. |
-| Universe | the S&P 500, snapshotted to `config/universe.txt` and refreshed monthly from Wikipedia's constituent table (`src/vs2/data/sp500.py`) | Real index membership rather than a liquidity proxy for it. Verified 2026-08-07: all 503 parsed symbols, including the two dotted tickers `BRK.B`/`BF.B`, match a tradable, active Alpaca asset with no reformatting -- see `docs/API_MENU.md`. |
+| Universe | the **Dow 30**, snapshotted to `config/universe.txt` and refreshed monthly from Wikipedia's constituent table (`src/vs2/data/index_membership.py`) | Externally published membership, and sized so the rule's signals fit the position limit -- see "Sizing the universe to the signal" below. Verified 2026-08-08: all 30 symbols are tradable, active and fractionable on Alpaca. |
 | Maximum concurrent positions | 20 | Bounds how many crosses can be acted on. |
 | Position size | equal weight, full account across the position limit | Roughly 5% of equity each. No conviction sizing — conviction would be a second mechanism. |
 | Decision cadence | once per trading day | |
@@ -107,6 +107,53 @@ crossover rule itself.
 If oversubscription turns out to be frequent rather than occasional, the
 universe is too large for the position limit and the universe should shrink.
 Shrinking the universe is preferable to making the tiebreak smarter.
+
+### Sizing the universe to the signal
+
+**Measured 2026-08-08**, running the production `detect_cross` over 451 trading
+days (2024-10-18 to 2026-08-07) of split/dividend-adjusted daily bars. This is a
+capacity study: it computes no returns and makes no claim about profitability,
+only about whether a 20-slot portfolio can express the rule's own signals.
+
+| Universe | Cross-up signals | Acted on | Declined, full |
+|---|---|---|---|
+| S&P 500 (503 names) | 8,279 | **8.1%** | 91.9% |
+| **Dow 30** | 482 | **91.5%** | 8.5% |
+| Top 40 by dollar volume | 609 | 80.6% | 19.4% |
+
+At 503 names the rule produced roughly twelve times more signals than 20 slots
+could hold, so **the dollar-volume tiebreak, not the crossover, was selecting
+the portfolio** — and the tiebreak was chosen precisely because it is *not* a
+prediction. The system would have been testing "do the highest-dollar-volume
+names that recently crossed beat the benchmark," which is a different question
+from the one this design asks.
+
+The Dow 30 was chosen over a self-defined top-40 list on two grounds: it acts on
+more of its signals (91.5% vs 80.6%), and its membership is externally published
+rather than invented here — the same reason the crossover rule itself was
+chosen. A smaller universe is a narrower test, and that is the accepted cost.
+
+Supporting figures, same run: median holding period **4 trading days** (mean
+13.5, max 277 — price oscillating around its own average crosses it
+repeatedly); implied turnover **12.3× per year** for the Dow 30; and at the
+measured median spread of 8.52bp, a round trip costs the full spread, so
+turnover alone implies roughly **1.05% of the account per year** in spread
+cost, before any question of edge.
+
+### Partial investment is the strategy, not a defect
+
+Same run: with the Dow 30 and 20 slots, **the portfolio holds 14.2 names on
+average** (median 16, and full at 20 on only 58 of 451 days). At 5% of equity
+per slot that leaves roughly **29% of the account in cash on average**.
+
+This is what a timing strategy does — being out of the market *is* the signal —
+but it is a measurement hazard worth stating before any result is read. Against
+a 100%-invested benchmark, a partially-invested strategy underperforms in a
+rising market regardless of whether its timing is any good, and outperforms in a
+falling one for the same reason. **A verdict therefore depends on which regime
+the run samples**, and a short run in a trending market will mislead in a
+predictable direction. The Day-60 review must report average invested exposure
+alongside return, or the comparison is not readable.
 
 ## Measurement
 

@@ -218,8 +218,8 @@ broker publishes this. VS2 should ask rather than encode.
 
 The whole menu above, reduced to what the rule in `DESIGN.md` requires:
 
-1. The Wikipedia constituent fetch (`src/vs2/data/sp500.py`) — monthly, to
-   refresh the universe
+1. The Wikipedia constituent fetch (`src/vs2/data/index_membership.py`) —
+   monthly, to refresh the universe
 2. Daily bars, **`adjustment=all`**, 51 days back — the only recurring Alpaca
    data call
 3. `get_calendar()` — to know which days are trading days
@@ -246,11 +246,25 @@ with a stated reason.
    cleanly and all 503 symbols were cross-checked against Alpaca's asset list:
    every one is tradable and active, including the two dotted tickers `BRK.B`
    and `BF.B`, with no reformatting needed. Implemented in
-   `src/vs2/data/sp500.py`, tested in `tests/test_sp500.py` against a real
-   trimmed fixture of the actual table markup.
-2. **Which data feed does this account have?** Determines whether `sip` is
-   available or whether it is `iex`/`delayed_sip`. Does not affect a daily-close
-   rule, but should be known rather than assumed.
+   `src/vs2/data/index_membership.py`, tested in
+   `tests/test_index_membership.py` against real trimmed fixtures of the actual
+   table markup.
+
+   **Narrowed 2026-08-08 to the Dow 30.** A capacity measurement found that at
+   503 names a 20-slot portfolio could act on only 8.1% of the rule's cross-up
+   signals, so the dollar-volume tiebreak rather than the crossover was
+   selecting the portfolio. The Dow 30 acts on 91.5%, and its membership is
+   externally published. Both pages expose the same `id="constituents"` table,
+   so one parser serves both and the S&P URL is retained for analysis. See
+   `DESIGN.md`, "Sizing the universe to the signal".
+2. ~~**Which data feed does this account have?**~~ **Resolved 2026-08-07: SIP.**
+   Tested directly: `sip` and `iex` both return data, `delayed_sip` is rejected
+   as an invalid feed, and an unset `feed` matches `sip` exactly (AAPL close
+   311.00 vs IEX's 310.94), so SIP is already this account's default. Note SIP
+   cannot be queried close to real time — a request ending at the current
+   instant returns `subscription does not permit querying recent SIP data` —
+   which is why `bars.py` keeps a 16-minute buffer. Irrelevant to a
+   daily-close rule, but now known rather than assumed.
 3. **Resting stop orders, or none at all?** `DESIGN.md` currently says the
    cross-down is the only exit. A broker-side stop is the one mechanism that
    survives an outage — but it is a second exit condition, which the design
