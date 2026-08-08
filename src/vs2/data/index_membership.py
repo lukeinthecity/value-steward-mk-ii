@@ -33,7 +33,10 @@ UNIVERSE_URL = DOW_URL
 UNIVERSE_MIN_EXPECTED = 25
 
 CONSTITUENTS_TABLE_ID = "constituents"
-USER_AGENT = "value-steward-mk-ii research (contact: luke.shefski@gmail.com)"
+USER_AGENT = (
+    "value-steward-mk-ii research "
+    "(contact: https://github.com/lukeinthecity/value-steward-mk-ii)"
+)
 
 
 class _ConstituentsTableParser(HTMLParser):

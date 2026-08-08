@@ -36,9 +36,14 @@ The full pipeline is built and verified against the live paper account:
 universe, daily bars, trading calendar, account equity, positions, 50-day
 crossover detection, decision-making, and order submission. `python -m
 vs2.run_daily` computes and logs every day's decisions; add `--execute` to
-actually submit orders. **`--execute` has never been passed against this
-account.** A crontab template exists (`crontab`) but is not installed
-anywhere — nothing here trades unattended yet.
+actually submit orders.
+
+The crontab is installed (dry-run only — see `crontab` for the template).
+**`--execute` has never been passed against this account.** Order submission
+does not retry on failure (a write is not safe to retry blindly, unlike every
+read in this codebase), and a decision day's execution attempt — success,
+failure, or partial — is tracked separately from whether decisions were
+merely computed, so a failed order can't be silently treated as handled.
 
 ## Trading
 
