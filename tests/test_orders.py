@@ -11,7 +11,12 @@ import pytest
 from alpaca.trading.enums import OrderSide
 
 from vs2.core.decision import Decision
-from vs2.data.orders import OrderClient, SubmissionResult, build_order_request
+from vs2.data.orders import (
+    OrderClient,
+    SubmissionResult,
+    build_order_request,
+    client_order_id,
+)
 
 
 def decision(
@@ -237,3 +242,54 @@ def test_submission_result_succeeded_reflects_whether_error_is_set() -> None:
     bad = SubmissionResult(decision("A", "BUY", notional=1.0), order=None, error="boom")
     assert ok.succeeded is True
     assert bad.succeeded is False
+
+
+# --- deterministic client order ids -------------------------------------------
+#
+# Two properties hang off this being derived from the decision rather than from
+# the clock: the broker rejects a resubmission of an order that actually
+# landed, and reconciliation has a key to look the fill up by.
+
+
+def test_client_order_id_is_derived_from_the_decision() -> None:
+    assert (
+        client_order_id(decision("AAPL", "BUY", notional=5000.0))
+        == "vs2-2026-08-10-AAPL-BUY"
+    )
+
+
+def test_buy_and_sell_of_one_symbol_on_one_day_do_not_collide() -> None:
+    assert client_order_id(decision("AAPL", "BUY", notional=5000.0)) != client_order_id(
+        decision("AAPL", "SELL", qty=10.0)
+    )
+
+
+def test_the_same_decision_always_yields_the_same_id() -> None:
+    """What makes a duplicate submission the broker's problem to reject rather
+    than ours to avoid perfectly."""
+
+    assert client_order_id(decision("AAPL", "BUY", notional=5000.0)) == client_order_id(
+        decision("AAPL", "BUY", notional=5000.0)
+    )
+
+
+def test_a_decision_with_no_day_cannot_be_keyed() -> None:
+    dateless = Decision(
+        symbol="AAPL",
+        day=None,
+        action="BUY",
+        reason_code="CROSS_UP",
+        close=100.0,
+        sma=90.0,
+        prior_close=89.0,
+        prior_sma=90.0,
+        notional=5000.0,
+        qty=None,
+    )
+
+    assert client_order_id(dateless) is None
+
+
+def test_the_id_reaches_the_built_request() -> None:
+    request = build_order_request(decision("AAPL", "BUY", notional=5000.0))
+    assert request.client_order_id == "vs2-2026-08-10-AAPL-BUY"

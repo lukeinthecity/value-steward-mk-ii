@@ -38,21 +38,58 @@ later.
 
 ## Status
 
-The full pipeline is built and verified against the live paper account:
-universe, daily bars, trading calendar, account equity, positions, 50-day
-crossover detection, decision-making, and order submission. `python -m
-vs2.run_daily` computes and logs every day's decisions; add `--execute` to
-actually submit orders.
+The pipeline and its measurement are both built: universe, daily bars, trading
+calendar, account state, 50-day crossover detection, decision-making, order
+submission, fill reconciliation, and the run review. `python -m vs2.run_daily`
+computes and logs decisions; add `--execute` to submit orders. `python -m
+vs2.report` produces the review.
 
-The crontab is installed (dry-run only — see `crontab` for the template).
-**`--execute` has never been passed against this account.** Order submission
-does not retry on failure (a write is not safe to retry blindly, unlike every
-read in this codebase), and a decision day's execution attempt — success,
-failure, or partial — is tracked separately from whether decisions were
-merely computed, so a failed order can't be silently treated as handled. The
-whole daily cycle runs under a single-instance lock, so two overlapping cron
-ticks can't both proceed — verified against a genuinely separate OS process,
-not just a second attempt within one.
+**`--execute` has never been passed against this account.** The crontab is
+installed dry-run only — see `crontab` for the template, and `crontab -l` for
+what is actually scheduled, which is the only source of truth.
+
+Deciding and executing are separate phases, because the rule needs a finished
+close and one does not exist until the market shuts. Decisions are computed
+after the close and submitted during the *next* session, at the first of
+several intraday attempts — see DESIGN.md, "When orders are actually placed".
+Only a session whose close has passed is ever evaluated; bars that fail to
+reach it are refused rather than traded as if current.
+
+Four things guard the write path. Order submission does not retry on failure (a
+write is not safe to retry blindly, unlike every read here). A decision day's
+execution attempt — success, failure, or partial — is tracked separately from
+whether decisions were merely computed. The whole cycle runs under a
+single-instance lock, verified against a genuinely separate OS process. And
+every order carries a deterministic `client_order_id`, so a duplicate
+submission is rejected by the broker rather than relying on our own bookkeeping
+being perfect.
+
+Four append-only logs under `data/` are what the run is measured from:
+`decisions.jsonl` (intent), `executions.jsonl` (what was attempted),
+`fills.jsonl` (what it became, and realized slippage), and `sessions.jsonl`
+(equity and exposure per session, plus any session that was skipped and why).
+
+## Notifications
+
+Two push notifications per trading day, via [ntfy](https://ntfy.sh) — an
+"open" one on the first in-session tick, and a "close" one once the day is
+decided. Order failures, missed sessions and stale bars lead the message and
+raise its priority, because the part you would act on should be the part you
+read first.
+
+Configured with the **same environment variables value-steward uses**
+(`VS_NTFY_TOPIC`, `VS_NTFY_SERVER`, `VS_NTFY_TOKEN`, `VS_PUSH_ENABLED`), so the
+`.env` copied across for the Alpaca credentials points both systems at one
+topic and one phone subscription — see `.env.example`. Confirm the wiring with
+`python -m vs2.push_test` (the equivalent of VS1's `npm run push:test`) before
+relying on it. Unset `VS_NTFY_TOPIC` and pushes are simply
+off — not an error. The topic is a secret and lives only in the gitignored
+`.env`; it is never logged, never in an error message, and never committed.
+
+A push is observability, never a control-path step: sending cannot raise, so a
+dead notification channel can never affect a cycle that is about to place
+orders. Every attempt is recorded in `data/pushes.jsonl`, because you cannot
+rely on the alert channel to tell you the alert channel is broken.
 
 ## Trading
 

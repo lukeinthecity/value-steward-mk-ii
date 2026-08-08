@@ -24,8 +24,8 @@ finding below was caught by executing something, not by reading it.
 
 ## 1. Methodology — techniques that have actually caught bugs here
 
-Before the specific checks: four techniques, each of which caught a real,
-otherwise-invisible bug this session. Default to these over reading code.
+Before the specific checks: the techniques below, each of which caught a real,
+otherwise-invisible bug in this project. Default to these over reading code.
 
 - **Simulate the real invocation environment, not your interactive shell.**
   A script that works when you run it directly can still fail under cron,
@@ -64,6 +64,21 @@ otherwise-invisible bug this session. Default to these over reading code.
   file is being incorrectly ignored (see above). When a check matters, verify
   the *content*, not just that a command completed: read the actual file
   back, count actual rows, print the actual value.
+- **Drive the real entrypoint through a scenario its tests never construct.**
+  Not a new fake, not a new unit test — the actual composed `run()`, with the
+  existing fakes, on an input the suite happens never to produce. This caught
+  the stale-bar defect on 2026-08-08: every one of `test_run_daily.py`'s cases
+  set the newest bar's date to today, so 169 passing tests said nothing about
+  what happens when it is three days old. A twenty-line script that answered
+  "what if the bars are stale?" showed `run(execute=True)` submitting a real
+  order and stamping the execution log with the stale date, silently. The
+  technique generalises: list the inputs the fixtures always hold constant, and
+  vary one. A constant in every fixture is an assumption nobody has tested.
+- **Check arithmetic that spans two units.** The buying-power defect found the
+  same day came from sizing in *equity* and paying in *cash*: correct on day
+  one, wrong as soon as holdings appreciated, and invisible to any test that
+  used a flat account. Where a calculation crosses two quantities that start
+  equal and drift apart, write down the case where they have drifted.
 - **`cmd; echo "$?"` is not a reliable way to check an exit code in this
   environment — `cmd && echo pass || echo fail` is.** Verified directly while
   writing this file: `grep "x" file_with_no_match; echo "$?"` printed `0`
@@ -193,18 +208,49 @@ anywhere else in the codebase.
 4. Do the fresh-clone test from section 1.
 5. Read "Known open findings" below and check whether each has actually been
    addressed, not just discussed.
-6. Only after 1–5: read the code changes since the last audit and apply
+6. Confirm the alert channel actually works — `python -m vs2.push_test`
+   should put a notification on the phone. A push that has never been sent
+   from *this* machine, with *this* `.env`, is an assumption; the topic being
+   present in the file is not the same as the send path working. VS1 shipped
+   `npm run push:test` for exactly this reason.
+7. If a run is in progress or just finished, run `python -m vs2.report` and
+   read the caveats section first. It is designed to say why a run is not
+   readable; a green-looking return above an unread warning list is exactly
+   the mistake this project exists to stop making.
+8. Only after 1–7: read the code changes since the last audit and apply
    sections 2–6 above to anything new.
 
 ---
 
 ## Known open findings
 
-Empty as of 2026-08-08 — the two items below were both closed the same day
-they were found. Kept here, marked resolved, as the record of what was
-checked and how; don't let this section silently become "empty because no
-one's looked lately" instead of "empty because nothing is open." If you find
-something new, add it above this note in the same format.
+Don't let this section silently become "empty because no one's looked lately"
+instead of "empty because nothing is open." If you find something new, add it
+above this note in the same format.
+
+### Open
+
+1. **Alpaca's intraday daily-bar behaviour is inferred, not tested.** The
+   design assumes the daily-bars endpoint serves an in-progress bar for the
+   current session during market hours, and `run_daily` drops any bar dated
+   after the last completed session on that basis. The guard is correct either
+   way — if no partial bar is served, it simply never fires — but the
+   assumption itself has not been checked against the live account, and this
+   playbook's own rule is not to take SDK behaviour from documentation prose.
+   **Check during the dry-run week**, before arming.
+2. **What Alpaca does with a `TimeInForce.DAY` market order submitted after the
+   close has never been observed here.** The cadence was changed specifically
+   so orders are submitted during regular hours instead, which avoids the
+   question in normal operation — but a late-running decide tick could still
+   land one outside hours. Place one deliberate paper order after the close and
+   record what happens, in `API_MENU.md` section 9.
+3. **The report's fixtures do not yet come from a real run.** `test_report.py`
+   drives the production pipeline and reports on the logs it actually wrote,
+   which is far better than hand-typed rows, but those rows still come from
+   fakes. Once the dry-run week has produced genuine `sessions.jsonl` and
+   `fills.jsonl` rows against the live account, capture a trimmed copy as a
+   fixture and assert against it — per section 4, a fixture cleaner than
+   production is not a test.
 
 ### Resolved
 
@@ -226,11 +272,29 @@ something new, add it above this note in the same format.
    re-raising, so a human has something to reconcile from even without the
    structured log file.
 
-**Deferred, not forgotten:** a more robust version of #2 would have the
+3. ~~**A stale bar is evaluated and traded as though it were current.**~~
+   Fixed 2026-08-08. The decision day came from whichever symbol sorted first
+   in the signal list, not from the calendar, so with the newest bar three days
+   old `run(execute=True)` submitted a real order and stamped the execution log
+   with the stale date, with no warning anywhere. `MarketCalendar` gained
+   `latest_completed_session()`; bars that do not reach it are refused as
+   `STALE_BARS` and nothing is decided. Found by driving the real `run()`
+   through a scenario no test constructed — see section 1.
+4. ~~**Buys could exceed available cash and be rejected by the broker.**~~
+   Fixed 2026-08-08. Equal-weight sizing divides equity while buys are paid
+   from cash; once holdings appreciate the two diverge (14 holdings up 20%
+   overdraws by $4,200 on a $100k account). `build_decisions` now caps buys at
+   available cash and records the remainder as `BUY_DECLINED_CASH`, so a
+   capacity limit stays a capacity decision instead of becoming an execution
+   failure that loses the signal.
+
+**Deferred, not forgotten:** a more robust version of resolved item #2 would have the
 guard ask the broker directly ("did I place today's orders?" via a dated
 order query) instead of trusting a local log file at all — the log would
 still exist for humans to read, but wouldn't be the guard's source of truth.
-This is a real improvement, not just a nice-to-have, but needs deterministic
-`client_order_id`s set at submission time and an extra API call inside the
-guard path, which is more machinery than today's fix warranted. Reconsider
-once this has run unattended for real, not before.
+**Half of this is now in place**: orders carry deterministic
+`client_order_id`s (`vs2-{day}-{symbol}-{action}`), so the broker itself
+rejects a duplicate submission of an order that landed, and `fills.py` already
+queries orders back by that key. What remains is moving the *guard* itself onto
+that query rather than the local log. Reconsider once this has run unattended
+for real, not before.

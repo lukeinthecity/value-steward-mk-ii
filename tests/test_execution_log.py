@@ -3,13 +3,18 @@ independent of decision_log.py's record of what was decided."""
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
 import pytest
 
 from vs2.core.decision import Decision
-from vs2.data.execution_log import append_execution_results, already_executed_today
+from vs2.data.execution_log import (
+    already_executed_today,
+    append_execution_results,
+    pending_submissions,
+)
 from vs2.data.orders import SubmissionResult
 
 
@@ -31,6 +36,18 @@ def make_decision(symbol: str, action: str = "BUY") -> Decision:
 class _FakeOrder:
     def __init__(self, order_id: str) -> None:
         self.id = order_id
+
+
+DAY = date(2026, 8, 10)
+buy = make_decision
+
+
+def ok(decision: Decision) -> SubmissionResult:
+    return SubmissionResult(decision, _FakeOrder(f"id-{decision.symbol}"), None)
+
+
+def failed(decision: Decision) -> SubmissionResult:
+    return SubmissionResult(decision, None, "rejected")
 
 
 def test_append_writes_one_row_per_result(tmp_path: Path) -> None:
@@ -267,3 +284,44 @@ def test_retries_are_not_used_up_by_a_successful_first_attempt(tmp_path: Path) -
     )
 
     assert flaky.open_calls == 1
+
+
+# --- what reconciliation reads back -------------------------------------------
+
+
+def test_rows_carry_the_reconciliation_key_and_the_close_to_measure_against(
+    tmp_path: Path,
+) -> None:
+    """Neither can be recovered later: the decision row may be superseded by a
+    --force re-run, and matching a fill by symbol and timestamp is guesswork."""
+
+    path = tmp_path / "executions.jsonl"
+    append_execution_results([ok(buy("AAPL"))], DAY, path)
+
+    row = json.loads(path.read_text(encoding="utf-8").strip())
+    assert row["client_order_id"] == "vs2-2026-08-10-AAPL-BUY"
+    assert row["decision_close"] == 100.0
+
+
+def test_pending_submissions_skips_failures(tmp_path: Path) -> None:
+    """An order that was never accepted has no fill to find."""
+
+    path = tmp_path / "executions.jsonl"
+    append_execution_results([ok(buy("AAA")), failed(buy("BBB"))], DAY, path)
+
+    pending = pending_submissions(path, set())
+
+    assert [row["symbol"] for row in pending] == ["AAA"]
+
+
+def test_pending_submissions_skips_what_is_already_reconciled(tmp_path: Path) -> None:
+    path = tmp_path / "executions.jsonl"
+    append_execution_results([ok(buy("AAA")), ok(buy("BBB"))], DAY, path)
+
+    pending = pending_submissions(path, {"vs2-2026-08-10-AAA-BUY"})
+
+    assert [row["symbol"] for row in pending] == ["BBB"]
+
+
+def test_pending_submissions_is_empty_for_a_missing_file(tmp_path: Path) -> None:
+    assert pending_submissions(tmp_path / "absent.jsonl", set()) == []

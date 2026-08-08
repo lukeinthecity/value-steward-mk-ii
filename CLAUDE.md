@@ -49,7 +49,13 @@ since the beginning — keep it consistent.
   ```
 - **`.env` is local and gitignored, not committed.** It holds the same Alpaca
   paper credentials VS1 uses (same account — see "Exactly one system may
-  trade this account" in `DESIGN.md`). If it's ever missing, `main()` in
+  trade this account" in `DESIGN.md`), and the same ntfy push settings
+  (`VS_NTFY_TOPIC`, `VS_NTFY_SERVER`, `VS_NTFY_TOKEN`, `VS_PUSH_ENABLED`) —
+  the variable names are deliberately identical to VS1's so one copied `.env`
+  configures both. **The ntfy topic is a secret**: anyone holding it can read
+  and publish to it. Never log it, never put it in a commit, an error message
+  or a doc, and never hardcode a server other than the public
+  `https://ntfy.sh` default. If it's ever missing, `main()` in
   `run_daily.py` calls bare `load_dotenv()`, which searches upward from the
   working directory and will **not** find VS1's `.env` (a sibling directory,
   not an ancestor) — it will crash on `os.environ["ALPACA_API_KEY_ID"]`
@@ -73,6 +79,17 @@ since the beginning — keep it consistent.
   Run `crontab -l` to see the actual live schedule. As of 2026-08-08 it's
   installed with `--execute` commented out on every line — dry run only,
   nothing here has traded yet. Don't assume that's still true; check.
+- **The cron fires many times a day, and that is not the same as deciding many
+  times a day.** One decision per completed close; the intraday ticks are
+  *execution* attempts at it, guarded to happen once. Confusing the two is how
+  VS1's 214 scorecard rows turned out to be 104 real decisions, so keep the
+  distinction sharp in any change to `run_daily.py`.
+- **Four append-only logs under `data/` are the run's only record**:
+  `decisions.jsonl`, `executions.jsonl`, `fills.jsonl`, `sessions.jsonl`.
+  Nothing recomputes them and nothing rewrites a row. If a change would make
+  any of them unwritten for a session, that session becomes unmeasurable —
+  `python -m vs2.report` will say so, and should be run after touching
+  anything in the daily cycle.
 - **Runnable scripts must guard `main()`** behind an
   `if __name__ == "__main__":` check (see `index_membership.py` or
   `run_daily.py`) so importing them for tests never executes real work

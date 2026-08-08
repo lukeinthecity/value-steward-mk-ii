@@ -35,7 +35,7 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Literal, Protocol, Sequence
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,14 @@ def _is_ascending(bars: Sequence[BarLike]) -> bool:
     return all(earlier < later for earlier, later in zip(stamps, stamps[1:]))
 
 
-def _day_of(bar: BarLike) -> date | None:
+def bar_day(bar: BarLike) -> date | None:
+    """The calendar day a bar belongs to, or None if its stamp is unusable.
+
+    Public because the daily cycle needs exactly this notion of "which day is
+    this bar" when it trims in-progress bars, and a second implementation of
+    it elsewhere would be free to drift from the one the rule uses.
+    """
+
     stamp = getattr(bar, "timestamp", None)
     if isinstance(stamp, datetime):
         return stamp.date()
@@ -208,7 +215,7 @@ def detect_cross(
     closes = _extract_closes(bars)
     if closes is None:
         logger.warning("%s: at least one bar has an unusable close price", symbol)
-        return _skip(symbol, "INVALID_CLOSE", bars, window, day=_day_of(bars[-1]))
+        return _skip(symbol, "INVALID_CLOSE", bars, window, day=bar_day(bars[-1]))
 
     close = closes[-1]
     prior_close = closes[-2]
@@ -224,7 +231,7 @@ def detect_cross(
 
     return CrossSignal(
         symbol=symbol,
-        day=_day_of(bars[-1]),
+        day=bar_day(bars[-1]),
         signal=signal,
         reason_code=signal,
         close=close,
@@ -238,7 +245,7 @@ def detect_cross(
 
 
 def detect_crosses(
-    bars_by_symbol: dict[str, Sequence[BarLike]], window: int = DEFAULT_WINDOW
+    bars_by_symbol: Mapping[str, Sequence[BarLike]], window: int = DEFAULT_WINDOW
 ) -> list[CrossSignal]:
     """Classify every symbol, sorted by symbol. Every input gets exactly one row.
 

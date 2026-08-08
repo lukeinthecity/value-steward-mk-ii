@@ -57,6 +57,28 @@ class SubmissionResult:
         return self.error is None
 
 
+def client_order_id(decision: Decision) -> str | None:
+    """A stable id derived from the decision itself, not from when it is sent.
+
+    Two properties follow from it being deterministic. The broker enforces
+    uniqueness on this field, so a resubmission of an order that actually
+    landed is rejected *by Alpaca* rather than silently duplicated -- which is
+    what makes `--force` safe to use after a partial failure: the orders that
+    already went through cannot go through twice, while the ones that genuinely
+    failed never registered an id and retry cleanly. And it gives
+    reconciliation a key to look a fill up by, without which matching a fill
+    back to the decision that caused it means guessing from symbol and
+    timestamp.
+
+    Returns None for a decision with no day, which cannot be keyed; the caller
+    submits without one rather than inventing a date.
+    """
+
+    if decision.day is None:
+        return None
+    return f"vs2-{decision.day.isoformat()}-{decision.symbol}-{decision.action}"
+
+
 def build_order_request(decision: Decision) -> MarketOrderRequest:
     """Translate one order Decision into an Alpaca request. Pure, no I/O --
     separated from submission so the mapping itself is directly testable."""
@@ -71,6 +93,7 @@ def build_order_request(decision: Decision) -> MarketOrderRequest:
             notional=round(decision.notional, 2),
             side=OrderSide.BUY,
             time_in_force=TimeInForce.DAY,
+            client_order_id=client_order_id(decision),
         )
     if decision.action == "SELL":
         if decision.qty is None or decision.qty <= 0:
@@ -80,6 +103,7 @@ def build_order_request(decision: Decision) -> MarketOrderRequest:
             qty=decision.qty,
             side=OrderSide.SELL,
             time_in_force=TimeInForce.DAY,
+            client_order_id=client_order_id(decision),
         )
     raise ValueError(
         f"{decision.symbol}: cannot submit a {decision.action} decision -- "
