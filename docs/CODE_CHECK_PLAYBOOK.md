@@ -208,11 +208,16 @@ anywhere else in the codebase.
 4. Do the fresh-clone test from section 1.
 5. Read "Known open findings" below and check whether each has actually been
    addressed, not just discussed.
-6. If a run is in progress or just finished, run `python -m vs2.report` and
+6. Confirm the alert channel actually works — `python -m vs2.push_test`
+   should put a notification on the phone. A push that has never been sent
+   from *this* machine, with *this* `.env`, is an assumption; the topic being
+   present in the file is not the same as the send path working. VS1 shipped
+   `npm run push:test` for exactly this reason.
+7. If a run is in progress or just finished, run `python -m vs2.report` and
    read the caveats section first. It is designed to say why a run is not
    readable; a green-looking return above an unread warning list is exactly
    the mistake this project exists to stop making.
-7. Only after 1–6: read the code changes since the last audit and apply
+8. Only after 1–7: read the code changes since the last audit and apply
    sections 2–6 above to anything new.
 
 ---

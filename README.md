@@ -80,7 +80,9 @@ read first.
 Configured with the **same environment variables value-steward uses**
 (`VS_NTFY_TOPIC`, `VS_NTFY_SERVER`, `VS_NTFY_TOKEN`, `VS_PUSH_ENABLED`), so the
 `.env` copied across for the Alpaca credentials points both systems at one
-topic and one phone subscription. Unset `VS_NTFY_TOPIC` and pushes are simply
+topic and one phone subscription — see `.env.example`. Confirm the wiring with
+`python -m vs2.push_test` (the equivalent of VS1's `npm run push:test`) before
+relying on it. Unset `VS_NTFY_TOPIC` and pushes are simply
 off — not an error. The topic is a secret and lives only in the gitignored
 `.env`; it is never logged, never in an error message, and never committed.
 
