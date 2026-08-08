@@ -200,26 +200,37 @@ anywhere else in the codebase.
 
 ## Known open findings
 
-Items identified but not yet resolved as of 2026-08-08. Check each before
-assuming this list is stale — if one has been fixed, move it to
-`VS1_MECHANISM_NOTES.md`-style historical record instead of leaving it here
-unresolved and undated.
+Empty as of 2026-08-08 — the two items below were both closed the same day
+they were found. Kept here, marked resolved, as the record of what was
+checked and how; don't let this section silently become "empty because no
+one's looked lately" instead of "empty because nothing is open." If you find
+something new, add it above this note in the same format.
 
-1. **Concurrent cron invocations can both pass the execution guard.**
-   `run_daily.run()` checks `already_executed_today()` once, near the top,
-   with no lock and no re-check immediately before `submit_all`. If one
-   invocation runs long enough for the next scheduled cron tick to fire
-   before it finishes, both can see "not yet executed" and both submit.
-   **Not yet live** — the installed crontab still has `--execute` commented
-   out on every line (`crontab -l | grep run_daily` to confirm this is still
-   true) — but this must be fixed before those lines are ever uncommented.
-2. **A failed execution-log write after a successful order submission loses
-   the record that the order happened.** `append_execution_results()` is
-   called after `submit_all()` with no error handling around it; if it
-   raises (disk full, permissions, anything local), the exception propagates
-   uncaught, and the next run's guard check has no way to know real orders
-   were already placed.
+### Resolved
 
-Both share a root cause worth restating: a real action and the durable
-record of that action are still two separate events with a gap between them
-— narrower than before PR #8, but not zero.
+1. ~~**Concurrent cron invocations can both pass the execution guard.**~~
+   Fixed by wrapping the whole cycle in a single-instance file lock
+   (`run_lock.py`, `fcntl.flock`, non-blocking — a second invocation fails
+   fast rather than waiting). Verified two ways: a unit test contending two
+   open file descriptions against the same lock path within one process
+   (`flock` locks belong to the open file description, not the process, so
+   this is a real test of the mechanism, not a simulation of one), and a
+   live check forking a genuinely separate OS process to hold the lock while
+   the real `run()` ran against it — confirmed `already_running=True` while
+   held, and normal operation resumed correctly once released.
+2. ~~**A failed execution-log write after a successful order submission loses
+   the record that the order happened.**~~ Fixed: the write now retries a
+   few times (safe here, unlike `orders.submit`'s retry — a local append
+   either lands or raises, without the network's "maybe it landed" ambiguity)
+   and, if every retry still fails, logs the raw results at `CRITICAL` before
+   re-raising, so a human has something to reconcile from even without the
+   structured log file.
+
+**Deferred, not forgotten:** a more robust version of #2 would have the
+guard ask the broker directly ("did I place today's orders?" via a dated
+order query) instead of trusting a local log file at all — the log would
+still exist for humans to read, but wouldn't be the guard's source of truth.
+This is a real improvement, not just a nice-to-have, but needs deterministic
+`client_order_id`s set at submission time and an extra API call inside the
+guard path, which is more machinery than today's fix warranted. Reconsider
+once this has run unattended for real, not before.

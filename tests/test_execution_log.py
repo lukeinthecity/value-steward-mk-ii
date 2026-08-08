@@ -6,6 +6,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from vs2.core.decision import Decision
 from vs2.data.execution_log import append_execution_results, already_executed_today
 from vs2.data.orders import SubmissionResult
@@ -153,3 +155,115 @@ def test_already_executed_today_finds_a_match_anywhere_in_the_file(tmp_path: Pat
         path,
     )
     assert already_executed_today(path, date(2026, 8, 10)) is True
+
+
+# --- write retries: safe here in a way orders.submit's retry was not --------
+
+
+class FlakyPath:
+    """Duck-types the two Path operations append_execution_results uses.
+    Fails .open() a configurable number of times, then delegates to a real
+    path underneath -- so the underlying write behavior is genuinely real,
+    only the failure injection is fake."""
+
+    def __init__(self, real_path: Path, fail_times: int) -> None:
+        self._real = real_path
+        self._fail_times = fail_times
+        self.open_calls = 0
+
+    @property
+    def parent(self) -> Path:
+        return self._real.parent
+
+    def open(self, mode: str, encoding: str | None = None):  # noqa: ANN201
+        self.open_calls += 1
+        if self.open_calls <= self._fail_times:
+            raise OSError("simulated: no space left on device")
+        return self._real.open(mode, encoding=encoding)
+
+
+def test_write_retries_and_succeeds_after_a_transient_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("vs2.data.execution_log.time.sleep", lambda _s: None)
+    real_path = tmp_path / "executions.jsonl"
+    flaky = FlakyPath(real_path, fail_times=1)
+
+    append_execution_results(
+        [SubmissionResult(make_decision("AAA"), _FakeOrder("x"), None)],
+        date(2026, 8, 10),
+        flaky,  # type: ignore[arg-type]
+    )
+
+    assert flaky.open_calls == 2  # one failure, then a successful retry
+    assert real_path.exists()
+    assert already_executed_today(real_path, date(2026, 8, 10)) is True
+
+
+def test_write_gives_up_after_exhausting_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("vs2.data.execution_log.time.sleep", lambda _s: None)
+    real_path = tmp_path / "executions.jsonl"
+    flaky = FlakyPath(real_path, fail_times=10)  # never succeeds within 3 default retries
+
+    with pytest.raises(OSError, match="simulated"):
+        append_execution_results(
+            [SubmissionResult(make_decision("AAA"), _FakeOrder("x"), None)],
+            date(2026, 8, 10),
+            flaky,  # type: ignore[arg-type]
+        )
+
+    assert flaky.open_calls == 3
+    assert not real_path.exists()  # every attempt failed; nothing was written
+
+
+def test_exhausted_retries_log_the_raw_results_at_critical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The entire point: if the durable record can't be written, the raw
+    # outcome must still be visible somewhere a human will see it.
+    monkeypatch.setattr("vs2.data.execution_log.time.sleep", lambda _s: None)
+    flaky = FlakyPath(tmp_path / "executions.jsonl", fail_times=10)
+
+    with caplog.at_level("CRITICAL", logger="vs2.data.execution_log"):
+        with pytest.raises(OSError):
+            append_execution_results(
+                [SubmissionResult(make_decision("ORPHANED"), _FakeOrder("real-id-123"), None)],
+                date(2026, 8, 10),
+                flaky,  # type: ignore[arg-type]
+            )
+
+    critical_messages = [r.message for r in caplog.records if r.levelname == "CRITICAL"]
+    assert len(critical_messages) == 1
+    assert "ORPHANED" in critical_messages[0]
+    assert "real-id-123" in critical_messages[0]
+
+
+def test_zero_retries_raises_a_distinct_error_rather_than_crashing_confusingly(
+    tmp_path: Path,
+) -> None:
+    # retries<=0 means the loop body never runs and no exception was ever
+    # caught -- a misuse of the function, not a write failure, and must not
+    # be reported as one.
+    flaky = FlakyPath(tmp_path / "executions.jsonl", fail_times=10)
+    with pytest.raises(RuntimeError, match="no attempt was made"):
+        append_execution_results(
+            [SubmissionResult(make_decision("AAA"), _FakeOrder("x"), None)],
+            date(2026, 8, 10),
+            flaky,  # type: ignore[arg-type]
+            retries=0,
+        )
+
+
+def test_retries_are_not_used_up_by_a_successful_first_attempt(tmp_path: Path) -> None:
+    real_path = tmp_path / "executions.jsonl"
+    flaky = FlakyPath(real_path, fail_times=0)  # succeeds immediately
+
+    append_execution_results(
+        [SubmissionResult(make_decision("AAA"), _FakeOrder("x"), None)],
+        date(2026, 8, 10),
+        flaky,  # type: ignore[arg-type]
+    )
+
+    assert flaky.open_calls == 1

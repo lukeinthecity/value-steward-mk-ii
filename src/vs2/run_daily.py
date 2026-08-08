@@ -16,6 +16,13 @@ to be independent, because it must still say yes even if every order in the
 attempt failed. See execution_log.py's docstring for why a partial failure is
 not auto-retried.
 
+The whole cycle runs under a single-instance file lock (run_lock.py). Cron
+does not wait for a prior invocation to finish before starting the next
+scheduled one, and there is a real gap between the guard check above and the
+guard-relevant write that would make it return differently next time -- see
+run_lock.py's docstring for the incident this closes. The lock, not the
+guard, is what prevents two overlapping invocations from both proceeding.
+
 `run()` takes every client as a parameter and touches no global state, so it
 is fully testable against fakes -- see test_run_daily.py. `main()` is the only
 place real credentials and real clients are constructed, and is deliberately
@@ -41,6 +48,7 @@ from vs2.data.decision_log import append_decisions, last_logged_day
 from vs2.data.execution_log import already_executed_today, append_execution_results
 from vs2.data.market_calendar import MarketCalendar
 from vs2.data.orders import OrderClient, SubmissionResult
+from vs2.data.run_lock import AlreadyRunningError, single_instance
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +61,7 @@ class RunResult:
     day: date | None
     trading_day: bool
     already_ran: bool
+    already_running: bool
     decisions: list[Decision]
     submitted: list[SubmissionResult]
     executed: bool
@@ -66,6 +75,7 @@ def run(
     universe: list[str],
     log_path: Path,
     execution_log_path: Path,
+    lock_path: Path,
     *,
     slots: int = DEFAULT_SLOTS,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
@@ -73,21 +83,66 @@ def run(
     force: bool = False,
     today: date | None = None,
 ) -> RunResult:
-    """Run one day's cycle. Safe to call repeatedly.
+    """Run one day's cycle. Safe to call repeatedly, including concurrently:
+    a second overlapping invocation fails fast on the lock rather than racing
+    the first one.
 
     In dry-run mode, a non-trading day or a decision day already computed is a
     no-op. In `--execute` mode, a non-trading day is still a no-op, but the
     guard that matters is different: whether execution was already *attempted*
     today, checked against `execution_log_path` rather than `log_path` -- see
     the module docstring for why those have to be two separate facts. Either
-    guard is skipped by `force=True`.
+    guard is skipped by `force=True` -- the lock is not; force does not mean
+    "run even on top of another live invocation."
     """
 
     today = today or date.today()
 
+    try:
+        with single_instance(lock_path):
+            return _run_locked(
+                calendar,
+                broker,
+                bars_client,
+                order_client,
+                universe,
+                log_path,
+                execution_log_path,
+                slots=slots,
+                lookback_days=lookback_days,
+                execute=execute,
+                force=force,
+                today=today,
+            )
+    except AlreadyRunningError:
+        logger.warning(
+            "%s: another instance is already running (lock at %s); skipping",
+            today,
+            lock_path,
+        )
+        return RunResult(today, False, False, True, [], [], False)
+
+
+def _run_locked(
+    calendar: MarketCalendar,
+    broker: BrokerClient,
+    bars_client: BarsClient,
+    order_client: OrderClient,
+    universe: list[str],
+    log_path: Path,
+    execution_log_path: Path,
+    *,
+    slots: int,
+    lookback_days: int,
+    execute: bool,
+    force: bool,
+    today: date,
+) -> RunResult:
+    """The actual cycle, called only while `run()` holds the lock."""
+
     if not calendar.is_trading_day(today):
         logger.info("%s is not a trading day; nothing to do", today)
-        return RunResult(today, False, False, [], [], False)
+        return RunResult(today, False, False, False, [], [], False)
 
     bars_by_symbol = bars_client.get_daily_bars(universe, lookback_days=lookback_days)
     signals = detect_crosses(bars_by_symbol)
@@ -101,7 +156,7 @@ def run(
                     "pass force=True to retry",
                     decision_day,
                 )
-                return RunResult(decision_day, True, True, [], [], False)
+                return RunResult(decision_day, True, True, False, [], [], False)
         else:
             last_day = last_logged_day(log_path)
             if last_day is not None and last_day >= decision_day:
@@ -111,7 +166,7 @@ def run(
                     decision_day,
                     last_day,
                 )
-                return RunResult(decision_day, True, True, [], [], False)
+                return RunResult(decision_day, True, True, False, [], [], False)
 
     equity = broker.get_equity()
     holdings = {h.symbol: h for h in broker.get_holdings()}
@@ -152,7 +207,7 @@ def run(
             order_count,
         )
 
-    return RunResult(decision_day, True, False, decisions, submitted, execute)
+    return RunResult(decision_day, True, False, False, decisions, submitted, execute)
 
 
 def main() -> None:
@@ -181,6 +236,7 @@ def main() -> None:
     universe = (repo_root / "config" / "universe.txt").read_text().split()
     log_path = repo_root / "data" / "decisions.jsonl"
     execution_log_path = repo_root / "data" / "executions.jsonl"
+    lock_path = repo_root / "data" / "run_daily.lock"
 
     api_key = os.environ["ALPACA_API_KEY_ID"]
     secret_key = os.environ["ALPACA_SECRET_KEY"]
@@ -197,6 +253,7 @@ def main() -> None:
         universe=universe,
         log_path=log_path,
         execution_log_path=execution_log_path,
+        lock_path=lock_path,
         execute=args.execute,
         force=args.force,
     )
