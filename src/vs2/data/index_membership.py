@@ -1,8 +1,17 @@
-"""Fetch S&P 500 constituent symbols from Wikipedia's community-maintained list.
+"""Fetch index constituent symbols from Wikipedia's community-maintained lists.
 
-Verified 2026-08-07: all 503 symbols this parses match a tradable, active
-Alpaca asset with no reformatting, including the two dotted tickers
-(BRK.B, BF.B) -- see docs/API_MENU.md for the cross-check.
+Both the Dow Jones Industrial Average and the S&P 500 pages expose their
+membership in a table with `id="constituents"` and a `Symbol` column, so one
+parser serves both.
+
+**The Dow 30 is the configured universe** -- see DESIGN.md for the measurement
+that chose it over the S&P 500. The S&P URL is kept because the wider list is
+useful for analysis, and because a future decision to widen the universe should
+not require rewriting this module.
+
+Verified 2026-08-07: all 503 S&P symbols and all 30 Dow symbols parse to
+tradable, active Alpaca assets with no reformatting, including the dotted
+tickers (BRK.B, BF.B) -- see docs/API_MENU.md for the cross-check.
 """
 
 from __future__ import annotations
@@ -16,7 +25,13 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
-WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+DOW_URL = "https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average"
+SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+
+# The configured universe. Changing this is a decision-affecting change.
+UNIVERSE_URL = DOW_URL
+UNIVERSE_MIN_EXPECTED = 25
+
 CONSTITUENTS_TABLE_ID = "constituents"
 USER_AGENT = "value-steward-mk-ii research (contact: luke.shefski@gmail.com)"
 
@@ -60,7 +75,7 @@ class _ConstituentsTableParser(HTMLParser):
             self._cell_text += data
 
 
-def fetch_constituents_html(url: str = WIKIPEDIA_URL, timeout: float = 20.0) -> str:
+def fetch_constituents_html(url: str = UNIVERSE_URL, timeout: float = 20.0) -> str:
     """Fetch the raw HTML of the constituents page. The only network call here."""
 
     request = Request(url, headers={"User-Agent": USER_AGENT})
@@ -68,13 +83,15 @@ def fetch_constituents_html(url: str = WIKIPEDIA_URL, timeout: float = 20.0) -> 
         return response.read().decode("utf-8")
 
 
-def parse_constituents(html: str, *, min_expected: int = 400) -> list[str]:
+def parse_constituents(html: str, *, min_expected: int = UNIVERSE_MIN_EXPECTED) -> list[str]:
     """Return sorted, de-duplicated ticker symbols from the constituents table.
 
     Pure function -- no network, no filesystem -- so it can be tested against a
     saved fixture instead of live Wikipedia. `min_expected` guards against a
     silently truncated or restructured page; tests pass a smaller value since
     the fixture is deliberately a handful of real rows, not the full table.
+    Pass a larger value when parsing the S&P page, where a 25-row result would
+    itself indicate a parse failure.
     """
 
     parser = _ConstituentsTableParser()
@@ -114,11 +131,13 @@ def write_universe(symbols: list[str], path: Path) -> None:
         raise
 
 
-def refresh_universe(path: Path, url: str = WIKIPEDIA_URL) -> list[str]:
+def refresh_universe(
+    path: Path, url: str = UNIVERSE_URL, *, min_expected: int = UNIVERSE_MIN_EXPECTED
+) -> list[str]:
     """Fetch, parse, and write the universe file. The composed entrypoint."""
 
     html = fetch_constituents_html(url)
-    symbols = parse_constituents(html)
+    symbols = parse_constituents(html, min_expected=min_expected)
     write_universe(symbols, path)
     logger.info("wrote %d symbols to %s", len(symbols), path)
     return symbols
