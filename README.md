@@ -16,6 +16,12 @@ that model production rows.
 Read [`DESIGN.md`](DESIGN.md) for the rule, the parameters, and the list of
 things deliberately left out. [`docs/API_MENU.md`](docs/API_MENU.md) records
 what the broker actually offers and which of it this system uses.
+[`docs/CODE_CHECK_PLAYBOOK.md`](docs/CODE_CHECK_PLAYBOOK.md) is an audit
+procedure for an independent session to verify this codebase, built from the
+specific bugs that have actually occurred here — read it before running or
+reviewing anything, and see its "Known open findings" for what isn't fixed
+yet. `CLAUDE.md` points a fresh Claude Code session at all of the above
+automatically.
 
 ## What the first iteration taught
 
