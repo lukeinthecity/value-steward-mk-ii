@@ -92,7 +92,8 @@ a number a reader can check by hand against a price chart.
 | Maximum concurrent positions | 20 | Bounds how many crosses can be acted on. |
 | Position size | equal weight, full account across the position limit | Roughly 5% of equity each. No conviction sizing — conviction would be a second mechanism. |
 | Decision cadence | once per trading day | |
-| Stop loss | none | The cross-down is the exit. |
+| Order type | **market** | Guaranteed execution. At the measured 2.55bp Dow spread and 12.3× turnover this costs ~0.31%/yr; a limit order saves at most that and, at VS1's measured 40% fill rate, would discard ~60% of signals. See "Why market orders" below. |
+| Stop loss | none | The cross-down is the exit. See "Why there is no resting stop order" below. |
 | Maximum holding period | none | Same reason. |
 
 ### The oversubscription problem
@@ -135,10 +136,20 @@ chosen. A smaller universe is a narrower test, and that is the accepted cost.
 
 Supporting figures, same run: median holding period **4 trading days** (mean
 13.5, max 277 — price oscillating around its own average crosses it
-repeatedly); implied turnover **12.3× per year** for the Dow 30; and at the
-measured median spread of 8.52bp, a round trip costs the full spread, so
-turnover alone implies roughly **1.05% of the account per year** in spread
-cost, before any question of edge.
+repeatedly), and implied turnover **12.3× per year** for the Dow 30.
+
+**Spread cost, measured against the Dow 30 specifically (2026-08-08).** Median
+per-symbol spread is **2.55bp** (AAPL 0.64, WMT 0.90, NVDA 0.90 at the tight
+end; UNH 7.59, CAT 9.70, BA 10.34 at the wide end), from consolidated SIP
+quotes during the 2026-08-07 session. A round trip crosses the full spread, so
+12.3× turnover implies roughly **0.31% of the account per year**, before any
+question of edge.
+
+An earlier draft of this section quoted 8.52bp and ~1.05%/yr. That figure came
+from a 60-name sample spanning the whole S&P 500, which includes mid-caps, and
+was carried over unchanged when the universe narrowed. The Dow 30 is entirely
+mega-cap and trades roughly 3.3× tighter. Re-measuring against the configured
+universe rather than inheriting a number is the general lesson.
 
 ### Partial investment is the strategy, not a defect
 
@@ -171,6 +182,77 @@ Run 3, which were abandoned for measurement faults rather than for results.
 - The headline number is the return of positions actually taken versus that
   benchmark. Positions not taken are reported separately and never averaged into
   the headline.
+
+## Why market orders
+
+A limit order buys a better price at the cost of uncertain execution. VS1 used
+mid-point limit orders ("fishing") and **filled 6 of 15 attempts — 40%**. Sixty
+percent of its intended trades simply never happened.
+
+That trade-off is decisive here, and against the measured numbers it is not
+close:
+
+- Crossing the spread costs **2.55bp** median on this universe, or roughly
+  **0.31% per year** at 12.3× turnover. That is the entire saving a limit order
+  could capture, and only if it always filled.
+- A 40% fill rate applied to a universe that already acts on 91.5% of its
+  signals would drop effective signal capture to about **37%** — discarding
+  most of the benefit the Dow 30 narrowing was chosen to gain.
+
+The measurement argument is stronger than the cost one. An unfilled limit order
+is a decision that never becomes data. VS1's central problem was never having
+enough decisions to measure anything, and its execution layer was quietly
+destroying more than half of them. **Market orders guarantee that every signal
+becomes a recorded outcome**, which is what the run has to produce to be worth
+running at all.
+
+Realized slippage against the decision-day close is recorded per fill, so the
+0.31% estimate can be checked against reality rather than assumed. That is an
+observation, not a mechanism — it changes no behavior.
+
+## Why there is no resting stop order
+
+Alpaca supports broker-side stop, stop-limit and trailing-stop orders. A resting
+stop is genuinely attractive for one reason: it lives at the broker and executes
+whether or not our code runs, so it survives an outage. VS1 lost 6 of 60
+weekdays to outages, during which its positions were entirely unprotected
+because its volatility stop was code that had to run — and was additionally
+blocked by two of its own gates (see
+[`VS1_MECHANISM_NOTES.md`](docs/VS1_MECHANISM_NOTES.md) entry 9).
+
+**Measured 2026-08-08** across 459 completed holdings on the Dow 30. A stop
+fires on an intraday low; the crossover rule exits only on a daily close, so the
+two disagree whenever price dips and recovers.
+
+| Stop | Fires | % of holdings | Of those, the rule's own exit was better |
+|---|---|---|---|
+| 3% | 126 | 27.5% | 51 (40%) |
+| 5% | 42 | 9.2% | 16 (38%) |
+| 8% | 16 | 3.5% | 5 (31%) |
+| 10% | 10 | 2.2% | 5 (50%) |
+
+"The rule's own exit was better" means the stop fired intraday, but by the time
+the crossover actually exited, price had recovered above the stop level — so the
+stop sold lower than waiting would have.
+
+**Between 31% and 50% of stop fires would be premature at every level tested.**
+That is not a protective mechanism behaving reliably; it is close to a coin flip
+that sometimes makes the outcome worse.
+
+The same table also bounds the risk of *not* having one: only **2.2% of holdings
+ever fell 10% below entry**, so deep adverse moves within a holding are rare.
+Note this measures frequency, not tail magnitude — it does not rule out a single
+catastrophic gap, and a genuine crash would be ridden down until the close
+crossed below the average.
+
+The decision is **no stop for the baseline run**, on three grounds. It is a
+second exit condition, which this design exists to avoid. It fires prematurely
+a third to half the time it fires at all. And the outage argument, while real,
+is an operations problem — solving it with a price mechanism conflates
+reliability with strategy, and would leave the run unable to say which one
+produced the result.
+
+Revisit at the post-run review, when the exit rule itself has been measured.
 
 ## Planned second mechanism (not built yet)
 

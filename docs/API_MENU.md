@@ -265,8 +265,11 @@ with a stated reason.
    instant returns `subscription does not permit querying recent SIP data` —
    which is why `bars.py` keeps a 16-minute buffer. Irrelevant to a
    daily-close rule, but now known rather than assumed.
-3. **Resting stop orders, or none at all?** `DESIGN.md` currently says the
-   cross-down is the only exit. A broker-side stop is the one mechanism that
-   survives an outage — but it is a second exit condition, which the design
-   deliberately excludes. This trade-off should be decided explicitly, not
-   inherited.
+3. ~~**Resting stop orders, or none at all?**~~ **Resolved 2026-08-08: no
+   stop, and market orders for entries.** Both measured against the Dow 30
+   specifically — see `DESIGN.md`, "Why market orders" and "Why there is no
+   resting stop order". A stop would fire prematurely (price recovers before
+   the rule's own exit) on 31–50% of fires at every level tested, against
+   only 2.2% of holdings ever reaching a 10% drawdown at all. A limit order
+   would save at most the 2.55bp measured spread while risking VS1's measured
+   40% fill rate on a universe already built to act on 91.5% of its signals.
