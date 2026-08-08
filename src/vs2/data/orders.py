@@ -14,24 +14,47 @@ BUY orders are notional (dollar-denominated), matching the equal-weight sizing
 `build_decisions` computes. SELL orders use the held quantity directly rather
 than a notional amount, so a position is closed exactly rather than leaving a
 fractional remainder from price drift since entry.
+
+`submit` deliberately does NOT use retry_alpaca, unlike every read in this
+codebase. A GET is safe to retry blindly -- asking twice is harmless. A submit
+is not: a transient-looking error (429/500/502) does not mean the order was
+rejected, only that the response was lost, and retrying an order whose first
+attempt actually landed places a second, duplicate order. One failed attempt
+stops and is reported rather than guessed at -- see `submit_all`, which
+carries this same principle into a batch: one order failing does not stop the
+others from being tried, and both outcomes are recorded rather than only the
+successes.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 
 from vs2.core.decision import Decision
-from vs2.data.retry import retry_alpaca
 
 logger = logging.getLogger(__name__)
 
 
 class _OrderSource(Protocol):
     def submit_order(self, order_data: MarketOrderRequest) -> Any: ...
+
+
+@dataclass(frozen=True)
+class SubmissionResult:
+    """The outcome of attempting one order -- never both order and error."""
+
+    decision: Decision
+    order: Any | None
+    error: str | None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.error is None
 
 
 def build_order_request(decision: Decision) -> MarketOrderRequest:
@@ -68,8 +91,11 @@ class OrderClient:
     def __init__(self, trading_client: _OrderSource) -> None:
         self._trading_client = trading_client
 
-    @retry_alpaca()
     def submit(self, decision: Decision) -> Any:
+        """Submit one order. Not retried -- see the module docstring. Raises
+        on failure; callers that need to keep going after one failure should
+        use `submit_all`, not call this in a loop themselves."""
+
         request = build_order_request(decision)
         logger.info(
             "submitting %s %s notional=%s qty=%s",
@@ -80,14 +106,36 @@ class OrderClient:
         )
         return self._trading_client.submit_order(request)
 
-    def submit_all(self, decisions: list[Decision]) -> list[Any]:
-        """Submit every order-bearing decision, sells first.
+    def submit_all(self, decisions: list[Decision]) -> list[SubmissionResult]:
+        """Attempt every order-bearing decision, sells first, and keep going
+        even if one fails.
 
         Selling before buying frees paper buying power sooner rather than
         later; it is a sensible default, not a settlement guarantee, since
         fills are not instantaneous even for market orders.
+
+        One order's failure does not stop the rest from being attempted --
+        an exception here would otherwise abort every order still queued
+        behind it, with no record of which ones were never tried. Every
+        decision gets a SubmissionResult, success or failure, so the caller
+        (and the log) can tell "placed" apart from "never attempted" apart
+        from "attempted and rejected."
         """
 
         orders = [d for d in decisions if d.is_order]
         orders.sort(key=lambda d: 0 if d.action == "SELL" else 1)
-        return [self.submit(d) for d in orders]
+
+        results: list[SubmissionResult] = []
+        for decision in orders:
+            try:
+                order = self.submit(decision)
+                results.append(SubmissionResult(decision, order, None))
+            except Exception as exc:
+                # Deliberately broad: every failure mode must produce a
+                # recorded result, not a crash that aborts the remaining
+                # orders in this batch.
+                logger.error(
+                    "failed to submit %s %s: %s", decision.action, decision.symbol, exc
+                )
+                results.append(SubmissionResult(decision, None, str(exc)))
+        return results

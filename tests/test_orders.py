@@ -11,7 +11,7 @@ import pytest
 from alpaca.trading.enums import OrderSide
 
 from vs2.core.decision import Decision
-from vs2.data.orders import OrderClient, build_order_request
+from vs2.data.orders import OrderClient, SubmissionResult, build_order_request
 
 
 def decision(
@@ -152,19 +152,88 @@ def test_submit_all_returns_one_result_per_order() -> None:
     assert len(results) == 2
 
 
-def test_submit_is_wrapped_in_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("vs2.data.retry.time.sleep", lambda _s: None)
+# --- submit does NOT retry: a write is not safe to repeat blindly -----------
 
+
+def test_submit_does_not_retry_a_transient_looking_error() -> None:
+    # A 429/500/502 on a write does not mean the order was rejected -- it may
+    # mean it landed and the response was lost. Retrying could duplicate it,
+    # so submit() must raise on the first failure rather than try again.
     class FlakyOnce:
         def __init__(self) -> None:
             self.calls = 0
 
         def submit_order(self, order_data: Any) -> dict:
             self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("429 too many requests")
-            return {"id": "ok"}
+            raise RuntimeError("429 too many requests")
 
     flaky = FlakyOnce()
-    OrderClient(flaky).submit(decision("AAPL", "BUY", notional=1000.0))
-    assert flaky.calls == 2
+    with pytest.raises(RuntimeError, match="429"):
+        OrderClient(flaky).submit(decision("AAPL", "BUY", notional=1000.0))
+    assert flaky.calls == 1
+
+
+# --- submit_all: one failure does not stop the rest -------------------------
+
+
+class SelectivelyFailingTradingClient:
+    """Fails submit_order for exactly the given symbols; succeeds for the rest."""
+
+    def __init__(self, fail_symbols: set[str]) -> None:
+        self._fail_symbols = fail_symbols
+        self.submitted: list[Any] = []
+
+    def submit_order(self, order_data: Any) -> dict:
+        self.submitted.append(order_data)
+        if order_data.symbol in self._fail_symbols:
+            raise RuntimeError(f"rejected: {order_data.symbol}")
+        return {"id": f"ok-{order_data.symbol}", "symbol": order_data.symbol}
+
+
+def test_submit_all_attempts_every_order_even_if_one_fails() -> None:
+    fake = SelectivelyFailingTradingClient(fail_symbols={"BAD"})
+    decisions = [
+        decision("GOOD1", "BUY", notional=1000.0),
+        decision("BAD", "BUY", notional=2000.0),
+        decision("GOOD2", "BUY", notional=3000.0),
+    ]
+
+    results = OrderClient(fake).submit_all(decisions)
+
+    # All three were attempted -- BAD failing did not stop GOOD2 from being tried.
+    assert [o.symbol for o in fake.submitted] == ["GOOD1", "BAD", "GOOD2"]
+    assert len(results) == 3
+
+
+def test_submit_all_marks_success_and_failure_correctly() -> None:
+    fake = SelectivelyFailingTradingClient(fail_symbols={"BAD"})
+    decisions = [decision("GOOD1", "BUY", notional=1000.0), decision("BAD", "BUY", notional=2000.0)]
+
+    results = OrderClient(fake).submit_all(decisions)
+    by_symbol = {r.decision.symbol: r for r in results}
+
+    good = by_symbol["GOOD1"]
+    assert good.succeeded is True
+    assert good.error is None
+    assert good.order is not None
+
+    bad = by_symbol["BAD"]
+    assert bad.succeeded is False
+    assert bad.error is not None
+    assert "BAD" in bad.error
+    assert bad.order is None
+
+
+def test_submit_all_does_not_raise_when_an_order_fails() -> None:
+    # The whole point: a failure is a recorded result, not an exception that
+    # propagates and takes down the caller (and every order still queued).
+    fake = SelectivelyFailingTradingClient(fail_symbols={"BAD"})
+    results = OrderClient(fake).submit_all([decision("BAD", "SELL", qty=1.0)])
+    assert results[0].succeeded is False
+
+
+def test_submission_result_succeeded_reflects_whether_error_is_set() -> None:
+    ok = SubmissionResult(decision("A", "BUY", notional=1.0), order={"id": "x"}, error=None)
+    bad = SubmissionResult(decision("A", "BUY", notional=1.0), order=None, error="boom")
+    assert ok.succeeded is True
+    assert bad.succeeded is False

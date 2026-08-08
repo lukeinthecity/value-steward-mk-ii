@@ -8,6 +8,14 @@ than being the default behavior of running this file. This mirrors
 value-steward's own `phase:reset` (dry run is the default, `--execute` is
 required to act) rather than inventing a new convention.
 
+Two different questions get two different guards. Dry-run mode asks "did I
+already compute today's decisions" (decision_log.py) -- repeating that is
+harmless, so it only prevents redundant log rows. `--execute` mode asks "did I
+already attempt to place today's orders" (execution_log.py) -- that guard has
+to be independent, because it must still say yes even if every order in the
+attempt failed. See execution_log.py's docstring for why a partial failure is
+not auto-retried.
+
 `run()` takes every client as a parameter and touches no global state, so it
 is fully testable against fakes -- see test_run_daily.py. `main()` is the only
 place real credentials and real clients are constructed, and is deliberately
@@ -24,15 +32,15 @@ import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 from vs2.core.crossover import detect_crosses
 from vs2.core.decision import Decision, build_decisions
 from vs2.data.bars import BarsClient, create_bars_client
 from vs2.data.broker import BrokerClient
 from vs2.data.decision_log import append_decisions, last_logged_day
+from vs2.data.execution_log import already_executed_today, append_execution_results
 from vs2.data.market_calendar import MarketCalendar
-from vs2.data.orders import OrderClient
+from vs2.data.orders import OrderClient, SubmissionResult
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +54,7 @@ class RunResult:
     trading_day: bool
     already_ran: bool
     decisions: list[Decision]
-    submitted: list[Any]
+    submitted: list[SubmissionResult]
     executed: bool
 
 
@@ -57,6 +65,7 @@ def run(
     order_client: OrderClient,
     universe: list[str],
     log_path: Path,
+    execution_log_path: Path,
     *,
     slots: int = DEFAULT_SLOTS,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
@@ -64,9 +73,15 @@ def run(
     force: bool = False,
     today: date | None = None,
 ) -> RunResult:
-    """Run one day's cycle. Safe to call repeatedly: a non-trading day or an
-    already-logged decision day is a no-op, not an error, unless `force` skips
-    that guard."""
+    """Run one day's cycle. Safe to call repeatedly.
+
+    In dry-run mode, a non-trading day or a decision day already computed is a
+    no-op. In `--execute` mode, a non-trading day is still a no-op, but the
+    guard that matters is different: whether execution was already *attempted*
+    today, checked against `execution_log_path` rather than `log_path` -- see
+    the module docstring for why those have to be two separate facts. Either
+    guard is skipped by `force=True`.
+    """
 
     today = today or date.today()
 
@@ -79,14 +94,24 @@ def run(
     decision_day = next((s.day for s in signals if s.day is not None), None)
 
     if not force and decision_day is not None:
-        last_day = last_logged_day(log_path)
-        if last_day is not None and last_day >= decision_day:
-            logger.info(
-                "%s already logged (last logged day %s); pass force=True to re-run",
-                decision_day,
-                last_day,
-            )
-            return RunResult(decision_day, True, True, [], [], False)
+        if execute:
+            if already_executed_today(execution_log_path, decision_day):
+                logger.info(
+                    "%s already has an execution attempt on record; "
+                    "pass force=True to retry",
+                    decision_day,
+                )
+                return RunResult(decision_day, True, True, [], [], False)
+        else:
+            last_day = last_logged_day(log_path)
+            if last_day is not None and last_day >= decision_day:
+                logger.info(
+                    "%s already logged (last logged day %s); "
+                    "pass force=True to re-run",
+                    decision_day,
+                    last_day,
+                )
+                return RunResult(decision_day, True, True, [], [], False)
 
     equity = broker.get_equity()
     holdings = {h.symbol: h for h in broker.get_holdings()}
@@ -101,10 +126,25 @@ def run(
     )
     append_decisions(decisions, log_path)
 
-    submitted: list[Any] = []
+    submitted: list[SubmissionResult] = []
     if execute:
         submitted = order_client.submit_all(decisions)
-        logger.info("EXECUTED: submitted %d orders", len(submitted))
+        if decision_day is not None:
+            append_execution_results(submitted, decision_day, execution_log_path)
+        failed = [r for r in submitted if not r.succeeded]
+        if failed:
+            logger.error(
+                "EXECUTED: %d/%d orders failed -- %s",
+                len(failed),
+                len(submitted),
+                ", ".join(f"{r.decision.symbol}: {r.error}" for r in failed),
+            )
+        else:
+            logger.info(
+                "EXECUTED: %d/%d orders submitted successfully",
+                len(submitted),
+                len(submitted),
+            )
     else:
         order_count = sum(1 for d in decisions if d.is_order)
         logger.info(
@@ -128,7 +168,8 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Run even if today's decision day is already logged.",
+        help="Run even if today's decision day is already logged (dry run) "
+        "or already has an execution attempt on record (--execute).",
     )
     args = parser.parse_args()
 
@@ -139,6 +180,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     universe = (repo_root / "config" / "universe.txt").read_text().split()
     log_path = repo_root / "data" / "decisions.jsonl"
+    execution_log_path = repo_root / "data" / "executions.jsonl"
 
     api_key = os.environ["ALPACA_API_KEY_ID"]
     secret_key = os.environ["ALPACA_SECRET_KEY"]
@@ -154,6 +196,7 @@ def main() -> None:
         order_client=OrderClient(trading_client),
         universe=universe,
         log_path=log_path,
+        execution_log_path=execution_log_path,
         execute=args.execute,
         force=args.force,
     )
@@ -176,6 +219,18 @@ def main() -> None:
                 decision.qty,
                 decision.reason_code,
             )
+
+    if result.executed:
+        failed = [r for r in result.submitted if not r.succeeded]
+        if failed:
+            # Non-zero exit is the cheap, dependency-free half of "alert on
+            # failure" -- it gives cron's own MAILTO or any external monitor
+            # something to key off without this project taking on a
+            # notification service as a new dependency. The other half is the
+            # ERROR-level log line already written inside run().
+            import sys
+
+            sys.exit(1)
 
 
 if __name__ == "__main__":
