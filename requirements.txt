@@ -1,6 +1,13 @@
-alpaca-py
-python-dotenv
-pytest
-ruff
-mypy
-bandit
+# Pinned exactly, because a 60-day measurement run should not change its own
+# dependencies halfway through. An unpinned alpaca-py in particular could pick
+# up a behaviour change on any rebuild, and a run whose instrument changed
+# mid-flight cannot be read -- which is the failure this project exists to
+# avoid. Bump these deliberately, between runs, not during one.
+#
+# Verified together against Python 3.11 and 3.12 with the full gate green.
+alpaca-py==0.43.5
+python-dotenv==1.2.2
+pytest==9.1.1
+ruff==0.16.2
+mypy==2.3.0
+bandit==1.9.4

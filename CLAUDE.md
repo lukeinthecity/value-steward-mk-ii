@@ -73,6 +73,17 @@ since the beginning — keep it consistent.
   Run `crontab -l` to see the actual live schedule. As of 2026-08-08 it's
   installed with `--execute` commented out on every line — dry run only,
   nothing here has traded yet. Don't assume that's still true; check.
+- **The cron fires many times a day, and that is not the same as deciding many
+  times a day.** One decision per completed close; the intraday ticks are
+  *execution* attempts at it, guarded to happen once. Confusing the two is how
+  VS1's 214 scorecard rows turned out to be 104 real decisions, so keep the
+  distinction sharp in any change to `run_daily.py`.
+- **Four append-only logs under `data/` are the run's only record**:
+  `decisions.jsonl`, `executions.jsonl`, `fills.jsonl`, `sessions.jsonl`.
+  Nothing recomputes them and nothing rewrites a row. If a change would make
+  any of them unwritten for a session, that session becomes unmeasurable —
+  `python -m vs2.report` will say so, and should be run after touching
+  anything in the daily cycle.
 - **Runnable scripts must guard `main()`** behind an
   `if __name__ == "__main__":` check (see `index_membership.py` or
   `run_daily.py`) so importing them for tests never executes real work

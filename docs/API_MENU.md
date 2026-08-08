@@ -212,6 +212,23 @@ Thanksgiving.
 `market_holidays.py`, and one of its audits found a missed early close. The
 broker publishes this. VS2 should ask rather than encode.
 
+**Tested 2026-08-08: the calendar's `open` and `close` are NAIVE datetimes
+carrying US Eastern wall-clock time.** `Calendar(date="2026-08-07",
+open="09:30", close="16:00")` yields `datetime(2026, 8, 7, 16, 0)` with
+`tzinfo=None`. Nothing in the response says which zone that is. Comparing it
+against a `datetime.now()` on a UTC host reads a 16:00 Eastern close as a 16:00
+UTC one and is four hours wrong — in the direction that treats an unfinished
+session as complete. `market_calendar.py` interprets them explicitly rather
+than trusting the host clock.
+
+**Daily bars during market hours include the session in progress.** Its
+`close` is the last trade so far, not a close. A crossover evaluated on it
+compares a partial price against an average that assumes a final one. This
+matters now that the cron runs intraday to execute; `run_daily` drops any bar
+dated after the last completed session before the rule sees it. **Confirm this
+against the live account during the dry-run week** — it is the one behaviour
+here inferred rather than tested.
+
 ---
 
 ## What the crossover rule actually needs

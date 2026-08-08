@@ -88,10 +88,12 @@ a number a reader can check by hand against a price chart.
 | Parameter | Starting value | Note |
 |---|---|---|
 | Moving-average window | 50 trading days | The published convention. |
-| Universe | the **Dow 30**, snapshotted to `config/universe.txt` and refreshed monthly from Wikipedia's constituent table (`src/vs2/data/index_membership.py`) | Externally published membership, and sized so the rule's signals fit the position limit -- see "Sizing the universe to the signal" below. Verified 2026-08-08: all 30 symbols are tradable, active and fractionable on Alpaca. |
+| Universe | the **Dow 30**, snapshotted to `config/universe.txt` from Wikipedia's constituent table (`src/vs2/data/index_membership.py`), refreshed **by hand between runs, never during one** | Externally published membership, and sized so the rule's signals fit the position limit -- see "Sizing the universe to the signal" below. Verified 2026-08-08: all 30 symbols are tradable, active and fractionable on Alpaca. A universe that shifts mid-run moves the benchmark under the measurement, which is worse than a stale constituent for sixty sessions. |
 | Maximum concurrent positions | 20 | Bounds how many crosses can be acted on. |
 | Position size | equal weight, full account across the position limit | Roughly 5% of equity each. No conviction sizing — conviction would be a second mechanism. |
-| Decision cadence | once per trading day | |
+| Cash ceiling | a day's buys are capped at settled cash | Sizing divides *equity*; buys are paid from *cash*. See "Why buys are capped at cash" below. |
+| Decision cadence | once per trading day, on a completed close | |
+| Execution cadence | during the **following** session, at the first of several intraday attempts | The rule needs a finished close, so an order cannot be placed on the day it is decided. See "When orders are actually placed" below. |
 | Order type | **market** | Guaranteed execution. At the measured 2.55bp Dow spread and 12.3× turnover this costs ~0.31%/yr; a limit order saves at most that and, at VS1's measured 40% fill rate, would discard ~60% of signals. See "Why market orders" below. |
 | Stop loss | none | The cross-down is the exit. See "Why there is no resting stop order" below. |
 | Maximum holding period | none | Same reason. |
@@ -101,9 +103,11 @@ a number a reader can check by hand against a price chart.
 On a day when more symbols cross up than there are open position slots, a choice
 has to be made, and any choice is an additional rule. The tiebreak is **trailing
 dollar volume, highest first** — chosen because it is a liquidity and
-fill-quality property, not a prediction about return. It is recorded in the
-decision log as a tiebreak so its effect can be measured separately from the
-crossover rule itself.
+fill-quality property, not a prediction about return. Each candidate's
+`dollar_volume` and its `tiebreak_rank` that day are written onto its decision
+row, so the tiebreak's effect can be measured separately from the crossover
+rule itself — without those two fields on the row, there is no way to
+reconstruct afterwards why one candidate was bought and another declined.
 
 If oversubscription turns out to be frequent rather than occasional, the
 universe is too large for the position limit and the universe should shrink.
@@ -166,6 +170,64 @@ the run samples**, and a short run in a trending market will mislead in a
 predictable direction. The Day-60 review must report average invested exposure
 alongside return, or the comparison is not readable.
 
+## When orders are actually placed
+
+The rule reads a **finished** close. A close does not exist until the bell
+rings. So a signal detected on day *t* cannot be acted on during day *t* — the
+earliest possible execution is the following session. This is arithmetic, not
+a policy choice, and every measurement below is written to match it.
+
+What *is* a choice is what happens in that following session. A market order
+left queued overnight fills at the opening auction, which is the least
+predictable price of the day and one nobody can see in advance. Instead the
+cron fires repeatedly through the next session and submits at the first tick,
+during liquid regular hours, at a price a human could have watched. Later ticks
+that day are no-ops.
+
+```
+Mon 16:15   decide Monday from Monday's close      (market shut, nothing sent)
+Tue 09:45   submit Monday's decisions              (market open)
+Tue 16:15   decide Tuesday from Tuesday's close
+Wed 09:45   submit Tuesday's decisions, reconcile Monday's fills
+```
+
+Two consequences the review has to respect. Execution is **one session behind**
+the decision, so the benchmark enters at the same next-session open rather than
+at the decision close — entering it at the close would hand it an overnight gap
+the strategy never got. And a decision is *replayed* from the log at execution
+time, never recomputed: by Tuesday morning the portfolio has already changed,
+and a recompute would quietly produce different orders from the ones recorded.
+
+Only a session whose close has passed is ever evaluated. During market hours
+Alpaca serves a daily bar for the session in progress, whose "close" is just
+the last trade so far; it is dropped before the rule sees it. Bars that fail to
+reach the completed session are refused as `STALE_BARS` and nothing is decided
+— an old close is never silently traded as a current one.
+
+## Why buys are capped at cash
+
+Equal-weight sizing divides **equity** by the slot count, but buys are paid for
+out of **cash**, and the two diverge as soon as holdings appreciate: each held
+slot is then worth more than `equity / slots`, so filling every free slot costs
+more than the account has. Concretely, 14 holdings up 20% gives equity of
+$114,000, a per-slot notional of $5,700, and six free slots wanting $34,200
+against $30,000 of cash — short by $4,200.
+
+Those buys used to be submitted anyway and rejected by the broker. That is the
+wrong shape of failure: a knowable capacity limit showed up as an execution
+fault, and the signal was lost — the very leak "Why market orders" exists to
+prevent. Buys are now taken in tiebreak order until cash runs out, and the
+remainder are recorded as `BUY_DECLINED_CASH`, kept distinct from
+`BUY_DECLINED_FULL`. The two mean different things: *full* says the universe is
+too large for the position limit, *cash* says equal-weight sizing has outrun the
+account. Only the first is an argument for shrinking the universe.
+
+Same-day sell proceeds count toward the ceiling at a 5% haircut, since a sell is
+qty-denominated and its proceeds depend on a fill price that does not exist yet.
+Settled cash is used rather than `buying_power`, which on a margin account
+includes borrowed money — sizing against it would quietly run the test on
+leverage.
+
 ## Measurement
 
 Measurement is specified before the system is built, and its correctness is
@@ -174,14 +236,31 @@ hand-written ideal ones. Both of those are direct responses to VS1's Run 2 and
 Run 3, which were abandoned for measurement faults rather than for results.
 
 - Every decision writes one row: symbol, date, action, reason code, price,
-  `sma50`, and the prior day's values that established the cross.
+  `sma50`, the prior day's values that established the cross, and the capacity
+  context it was decided under (`dollar_volume`, `tiebreak_rank`,
+  `available_cash`, `slots_free`).
 - One row per symbol per decision day. The daily cadence removes the duplicate
-  rows that VS1 produced from four intraday slots.
+  rows that VS1 produced from four intraday slots. Note the many intraday cron
+  ticks are *execution* attempts, not decision slots — the distinction is the
+  whole reason VS1's 214 scorecard rows collapsed to 104 real ones.
+- Each session writes one row of account state — equity, cash, per-position
+  market value — to `data/sessions.jsonl`. Without it, average invested
+  exposure cannot be computed at all, and cannot be reconstructed afterwards.
+- Each order is read back after the fact into `data/fills.jsonl`: status, fill
+  price, and realized slippage against the decision close.
 - The benchmark is a buy-and-hold position in the same universe, computed over
-  the same dates from the same bars.
+  the same dates from the same bars, entered at the same next-session open the
+  strategy trades at.
 - The headline number is the return of positions actually taken versus that
   benchmark. Positions not taken are reported separately and never averaged into
   the headline.
+
+`python -m vs2.report` produces the review from those four logs. It reports
+**why it is not readable** as prominently as any return figure: missed
+sessions, stale-bar days, missing exposure rows, signals that do not reconcile,
+and intended buys that never became fills each suppress the verdict rather than
+being averaged over. A run that cannot be read should say so — that is the
+single thing VS1's three runs never did.
 
 ## Why market orders
 
@@ -206,9 +285,16 @@ destroying more than half of them. **Market orders guarantee that every signal
 becomes a recorded outcome**, which is what the run has to produce to be worth
 running at all.
 
-Realized slippage against the decision-day close is recorded per fill, so the
-0.31% estimate can be checked against reality rather than assumed. That is an
-observation, not a mechanism — it changes no behavior.
+Realized slippage against the decision-day close is recorded per fill
+(`src/vs2/data/fills.py` → `data/fills.jsonl`), so the 0.31% estimate can be
+checked against reality rather than assumed. Signed so that positive always
+means worse than the close, on both sides. That is an observation, not a
+mechanism — it changes no behavior.
+
+Note the fill happens in the session *after* the close it is measured against,
+so this figure is spread plus overnight gap, not spread alone. It is still the
+right number to check, because it is the cost the strategy actually pays; it is
+simply not comparable to a quoted spread without saying so.
 
 ## Why there is no resting stop order
 

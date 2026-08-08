@@ -2,43 +2,87 @@
 #
 # NOT installed anywhere by checking this file in. Customize the paths below,
 # then install with `crontab crontab` (or merge into an existing crontab).
+# `crontab -l` is the only source of truth for what is actually scheduled;
+# this file and the live schedule drift, and have before.
 #
-# One job, run_daily, in a retry window rather than at one precise instant.
-# The rule reads a finalized daily close, which is not published exactly at
-# market close, and close time itself varies (1pm ET on early-close days,
-# per the exchange calendar in market_calendar.py) -- so the window opens
-# comfortably after the LATEST normal close (4pm ET) and checks every 15
-# minutes for 90 minutes, covering an early-close day's bar (published hours
-# earlier) just as well as a normal day's.
+# ---------------------------------------------------------------------------
+# ONE COMMAND, MANY TICKS
+# ---------------------------------------------------------------------------
 #
-# This window means cron WILL start a second invocation before a slow first
-# one finishes, on some days -- that is the design, not a bug, and is exactly
-# why every attempt after the first has to be a genuinely harmless no-op, not
-# just usually one. Two mechanisms make that true together: run_daily.py's
-# once-per-day guard (last_logged_day / already_executed_today) answers "did
-# today already happen", and a single-instance file lock (run_lock.py)
-# answers "is another attempt in flight right now" -- the guard alone was not
-# enough, since there is a real gap between checking it and the write that
-# would make it answer differently, which is exactly the gap two overlapping
-# cron ticks can land in. This is the wide-retry-window-plus-idempotent-guard
-# pattern value-steward's own EOD cron used, with the added lock this
-# codebase's own history showed the pattern needs once it governs real
-# orders rather than a read-only pipeline -- see
-# docs/CODE_CHECK_PLAYBOOK.md's "Known open findings" (resolved 2026-08-08)
-# for the incident this closes.
+# run_daily does whichever of its two jobs is outstanding, so every line below
+# is the same command. What differs is only when it fires:
 #
-# Local system clock is assumed to read US Eastern time directly, matching
-# value-steward's own crontab convention there -- confirm this holds before
-# installing; if the machine's clock is UTC or something else, convert.
+#   16:15–17:00  the market is shut, so the latest COMPLETED session is today.
+#                Today's decisions are computed and logged. Nothing is sent.
+#   09:45–15:45  the market is open, and the latest completed session is still
+#                YESTERDAY. Yesterday's logged decisions are submitted, at the
+#                first tick that succeeds; every later tick that day is a
+#                no-op.
 #
-# DRY RUN BY DEFAULT. This line does not place any order -- it computes and
-# logs today's decisions only. Add --execute (a second, separate, deliberate
-# line below) only once you have decided to let it trade unattended.
-15,30,45 16 * * 1-5 cd /home/YOUR_USER/value-steward-2 && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
-0,15,30,45 17 * * 1-5 cd /home/YOUR_USER/value-steward-2 && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+# Deciding needs a finished close, which does not exist until the bell rings —
+# so an order can only ever be placed in the following session. Submitting
+# during regular hours, rather than leaving a market order queued into the
+# opening auction, is a deliberate choice: the opening print is the least
+# predictable price of the day, and a queued order takes whatever it gives.
+#
+# The retry windows are wide on purpose. A daily bar is not published the
+# instant the market closes, and a single missed tick must not cost a session.
+# That width means cron WILL start a second invocation before a slow first one
+# finishes on some days — that is the design, and it is exactly why every
+# attempt after the first has to be a genuinely harmless no-op rather than
+# usually one. Three mechanisms make that true together:
+#
+#   * a single-instance file lock (run_lock.py) — "is another attempt in
+#     flight right now";
+#   * the once-per-day guards (decision_log / execution_log) — "did this
+#     already happen";
+#   * deterministic client_order_ids — the broker itself rejects a duplicate
+#     submission of an order that actually landed, so the last line of defence
+#     is not our bookkeeping.
+#
+# ---------------------------------------------------------------------------
+# BEFORE INSTALLING, CHECK TWO THINGS
+# ---------------------------------------------------------------------------
+#
+# 1. THE CLOCK. These times are US Eastern. Confirm the machine agrees
+#    (`date`; `timedatectl` if present). If it reads UTC, the 16:15 line fires
+#    at 12:15 ET — the middle of the session — and the decide window never
+#    lands after a close. The code itself is safe either way (it reads the
+#    broker's calendar in Eastern and refuses an unfinished session), but the
+#    schedule would be pointless. Convert the times if the clock is not ET.
+#
+# 2. MAILTO. Set it to a real address. run_daily exits non-zero when an order
+#    fails, and that exit code is the cheap half of "alert me" — but only if
+#    something is listening. Without MAILTO the failure is silent.
+#
+MAILTO=you@example.com
 
-# To let it actually place orders once armed, replace both lines above with
-# the same two lines plus `--execute`:
+# `mkdir -p logs` is load-bearing, not tidiness: the shell sets up the `>>`
+# redirect BEFORE python runs, so if logs/ does not exist the redirect fails,
+# the command never executes, and the run produces no output at all — the
+# quietest possible failure. logs/ is gitignored, so a fresh clone has none.
+
+# --- DRY RUN (default). Computes and logs decisions; sends nothing. ---
+45 9,10,11,13,14,15 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+15,30,45 16 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+0 17 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+
+# --- ARMED. Replace the three lines above with these to let it trade. ---
 #
-# 15,30,45 16 * * 1-5 cd /home/YOUR_USER/value-steward-2 && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily --execute >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
-# 0,15,30,45 17 * * 1-5 cd /home/YOUR_USER/value-steward-2 && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily --execute >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+# Do this only after the dry-run week has shown sessions.jsonl gaining one
+# DECIDED row per session, with a sane invested_fraction, and no STALE_BARS.
+#
+# 45 9,10,11,13,14,15 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily --execute >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+# 15,30,45 16 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily --execute >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+# 0 17 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily --execute >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
+
+# --- The universe is NOT refreshed on a schedule, deliberately. ---
+#
+# DESIGN.md calls the Dow 30 membership "refreshed monthly", and index
+# membership does change. But a universe that shifts mid-run changes the
+# benchmark under the measurement, which is a worse problem than a stale
+# constituent for sixty sessions. Refresh it by hand between runs:
+#
+#   .venv/bin/python -m vs2.data.index_membership
+#
+# and record that you did, so the review knows which universe it covers.
