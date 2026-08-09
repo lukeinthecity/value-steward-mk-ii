@@ -102,11 +102,14 @@ until the crossover baseline produces a readable result. The boundary is
 asserted against the real import graph in `tests/test_world_isolation.py`
 rather than left to convention.
 
-`python -m vs2.world.cli` imports the history from value-steward. The working
-series is the most recent contiguous run (2026-05-05 onward); an earlier block
-is archived separately because a permanent six-week gap separates them and
-merging across it would produce a series later analysis must silently average
-over. See [`world_history/README.md`](world_history/README.md).
+`python -m vs2.world.cli` imports the history from value-steward — run and
+archived 2026-08-09. The working series is 939 rows, 2026-05-05 to 2026-08-07,
+verified genuine before import (every row's `generated_at` falls on its own
+`date`, across 82 distinct generation days — a batch-written block cannot
+produce that). An earlier 136-row block (2026-01-23 to 2026-03-20) is archived
+separately: a permanent six-week gap separates the two, and merging across it
+would produce a series later analysis must silently average over. Both live in
+[`world_history/`](world_history/README.md), tracked and immutable.
 
 ## Trading
 
