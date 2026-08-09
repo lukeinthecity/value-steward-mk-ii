@@ -216,6 +216,17 @@ anywhere else in the codebase.
 
 ## 6. Destructive or git operations
 
+- **A rejected push to a protected branch is the moment this project has
+  historically destroyed data.** GH013 arrives, the instinct is
+  `git branch x && git reset --hard HEAD~1`, and on 2026-07-25 that discarded
+  three live runtime files including an engaged kill switch. Branch protection
+  on *this* repo went from absent (2026-08-08) to enforced (2026-08-09), so the
+  rejection is now reachable here too. The safe move needs no judgement call:
+  `git checkout -b <branch>` carries the commit, then `git branch -f main
+  origin/main` rewinds `main` by moving a ref while it is not checked out,
+  which cannot touch the working tree. Prefer it even when a reset would have
+  been fine — the whole failure mode is that it usually is.
+
 - **Before any `reset`, `checkout --`, or `clean` in a repository, run
   `git status` first**, even if — especially if — the identical command
   sequence just worked cleanly elsewhere in the same session. This project's

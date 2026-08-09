@@ -64,11 +64,27 @@ since the beginning — keep it consistent.
   never read or display the actual key values.
 - **`gh` is authed in WSL only**, same as VS1 (shared machine, shared auth).
   Push and open PRs from WSL.
-- **No branch protection on this repo as of 2026-08-08** — direct pushes and
-  `gh pr merge` both work without VS1's `GH013` rule-violation gate. Confirm
-  this is still true before assuming it (`git push origin main` failing with
-  a rule-violation error means it's since been added — branch and PR instead,
-  matching VS1's convention).
+- **Branch protection IS on, as of 2026-08-09.** A direct `git push origin
+  main` is rejected with `GH013: Repository rule violations found` — changes
+  must go through a pull request, and 3 of 3 required status checks must pass.
+  Branch and PR, matching VS1's convention. (This file said the opposite until
+  2026-08-09; it was true on 2026-08-08 and stopped being true the next day,
+  which is why it told you to confirm rather than assume.)
+- **When a direct push to `main` is rejected, do NOT `git reset --hard` to move
+  the commit onto a branch.** That exact sequence — rejected push, then
+  `git branch x && git reset --hard HEAD~1` — is the worst incident in
+  `agent-playbooks/INCIDENT-LOG.md`: it discarded live uncommitted runtime
+  state, including a kill switch that had been engaged minutes earlier, and was
+  found by accident days later. Use a sequence that cannot touch the working
+  tree at all:
+  ```
+  git status                                   # look first, always
+  git checkout -b <branch>                     # the commit comes with you
+  git push -u origin <branch>
+  git branch -f main origin/main               # main isn't checked out; only a pointer moves
+  ```
+  `git branch -f` on a branch you are not standing on moves a ref and nothing
+  else. Prefer it to any reset that *would* have been fine.
 - **Squash-merging a PR means `git branch -d` will refuse the local branch**
   afterward even though it's genuinely merged (git's ancestry check doesn't
   recognize a squashed commit as contained). Confirm the merge via
