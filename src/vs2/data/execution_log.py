@@ -64,6 +64,29 @@ def _order_id(order: Any) -> str | None:
 
 def _build_rows(results: list[SubmissionResult], day: date) -> list[dict[str, Any]]:
     logged_at = _utc_now_z()
+    if not results:
+        # A day whose decisions contained no orders was still *attempted*, and
+        # the guard has to be able to say so. Without this row the file stays
+        # empty, `already_executed_today` keeps answering False, and every
+        # intraday tick re-enters the execute branch -- harmless in that it
+        # places nothing, but it means the once-per-day property quietly does
+        # not hold on the most common kind of day. Most sessions produce no
+        # order at all: the Dow 30 yielded 482 cross-ups over 451 sessions.
+        return [
+            {
+                "day": day.isoformat(),
+                "symbol": None,
+                "action": "NO_ORDERS",
+                "notional": None,
+                "qty": None,
+                "succeeded": True,
+                "order_id": None,
+                "client_order_id": None,
+                "decision_close": None,
+                "error": None,
+                "logged_at": logged_at,
+            }
+        ]
     return [
         {
             "day": day.isoformat(),

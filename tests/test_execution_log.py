@@ -325,3 +325,29 @@ def test_pending_submissions_skips_what_is_already_reconciled(tmp_path: Path) ->
 
 def test_pending_submissions_is_empty_for_a_missing_file(tmp_path: Path) -> None:
     assert pending_submissions(tmp_path / "absent.jsonl", set()) == []
+
+
+def test_a_day_with_no_orders_still_records_that_it_was_attempted(
+    tmp_path: Path,
+) -> None:
+    """Most sessions produce no order at all. Without a row the guard keeps
+    answering False and every intraday tick re-enters the execute branch --
+    placing nothing, but breaking the once-per-day property on the commonest
+    kind of day."""
+
+    path = tmp_path / "executions.jsonl"
+    append_execution_results([], DAY, path)
+
+    assert already_executed_today(path, DAY) is True
+    row = json.loads(path.read_text(encoding="utf-8").strip())
+    assert row["action"] == "NO_ORDERS"
+    assert row["symbol"] is None
+
+
+def test_the_no_orders_marker_is_not_reconciled(tmp_path: Path) -> None:
+    """It has no client_order_id, so there is no fill to go looking for."""
+
+    path = tmp_path / "executions.jsonl"
+    append_execution_results([], DAY, path)
+
+    assert pending_submissions(path, set()) == []

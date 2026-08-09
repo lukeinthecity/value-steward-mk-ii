@@ -770,3 +770,21 @@ def test_no_push_config_is_a_normal_cycle_with_no_notifications(
 
     assert result.executed is True
     assert not paths.pushes.exists()
+
+
+def test_a_zero_order_day_converges_too(tmp_path: Path) -> None:
+    """The commonest kind of session. Previously each intraday tick re-entered
+    the execute branch and appended another EXECUTED row, because an empty
+    executions log left the guard answering False forever."""
+
+    trading, kwargs, paths = _standard(tmp_path, last_close=5.0)  # no cross, nothing held
+
+    run(**kwargs, paths=paths, execute=True, now=AFTER_CLOSE)
+    for hour in (9, 10, 11, 13, 14, 15):
+        run(**kwargs, paths=paths, execute=True, now=datetime(2026, 8, 11, hour, 45))
+
+    events = [r["event"] for r in load_sessions(paths.sessions)]
+
+    assert trading.submitted == []
+    assert events.count("DECIDED") == 1
+    assert events.count("EXECUTED") == 1
