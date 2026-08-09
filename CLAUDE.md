@@ -76,9 +76,16 @@ since the beginning — keep it consistent.
   then `git branch -D` is safe.
 - **The crontab is environment state, not something this repo's git history
   tracks.** `crontab` at the repo root is a *template*, not what's installed.
-  Run `crontab -l` to see the actual live schedule. As of 2026-08-08 it's
-  installed with `--execute` commented out on every line — dry run only,
-  nothing here has traded yet. Don't assume that's still true; check.
+  Run `crontab -l` to see the actual live schedule — always, before saying
+  anything about what is scheduled. **Checked 2026-08-09: `crontab -l` for
+  `lukes` is empty. Nothing is scheduled and nothing here has ever traded.**
+  An earlier version of this file said the crontab was "installed with
+  `--execute` commented out on every line", which was never true of the live
+  schedule; it described the template. Don't assume the line above is still
+  current either — check.
+  (Cron itself is running and the machine clock is US Eastern, both confirmed
+  the same day: `systemctl status cron` showed the daemon active, and its
+  timestamps read EDT, which is what the template's times assume.)
 - **The cron fires many times a day, and that is not the same as deciding many
   times a day.** One decision per completed close; the intraday ticks are
   *execution* attempts at it, guarded to happen once. Confusing the two is how

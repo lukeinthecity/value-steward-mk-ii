@@ -101,7 +101,24 @@ otherwise-invisible bug in this project. Default to these over reading code.
   any new script added to the crontab, and to the crontab file itself after
   any edit — confirm `crontab -l` shows what you think it shows, not what the
   template file says (they can drift; the template is not automatically
-  installed).
+  installed). **Concretely, on 2026-08-09 `crontab -l` turned out to be
+  empty**, while `CLAUDE.md` had been asserting for a day that the schedule was
+  "installed with `--execute` commented out on every line". Nothing was
+  installed; the sentence was describing the template file. The drift a doc
+  warns about is one the same doc can suffer from.
+- **Cron running at all is a separate question from the crontab's contents,
+  and on WSL it is not a given** — cron is not started by default there. Check
+  `pgrep -a cron` or `systemctl status cron`, not just `crontab -l`: an
+  installed schedule with no daemon produces exactly the same output as a
+  correct setup, and exactly zero runs. Confirmed running on this machine
+  2026-08-09.
+- **Confirm the machine clock's timezone before trusting a schedule's times.**
+  The crontab's hours assume US Eastern. `market_calendar.py` interprets the
+  broker's naive timestamps explicitly, so the *code* is correct under any host
+  timezone — but a UTC clock would fire the decide window at midday and the
+  execute window overnight, and nothing would error. `systemctl status cron`
+  prints its timestamps in the host zone, which is a cheap way to read it
+  (EDT, confirmed 2026-08-09).
 - **`.gitignore` patterns must be anchored** (`/data/`, not `data/`) unless
   the intent is genuinely to match that name at every depth. Check any new
   top-level-named directory actually gets tracked: create a throwaway file
