@@ -167,6 +167,17 @@ anywhere else in the codebase.
   batch on the first one (check for a bare list comprehension or similar
   around a loop that calls an API — that pattern aborts on first exception).
 
+## 3b. Boundaries that exist only as conventions
+
+- **A rule nobody can check is not a boundary.** DESIGN.md defers world-state
+  gating until the crossover baseline reads, and the only thing keeping
+  `vs2.world` from becoming a gate is that nothing wires it to the decision
+  path. That is asserted against the actual import graph in
+  `tests/test_world_isolation.py`, not left to review. Any future "X must never
+  depend on Y" rule in this project should get the same treatment — the test is
+  a dozen lines and it fails at the moment the line is crossed rather than
+  months later.
+
 ## 4. Test fixture realism
 
 - **Any fixture representing external data (an API response, a scraped HTML
@@ -177,6 +188,14 @@ anywhere else in the codebase.
   exactly what let value-steward's predecessor ship four separate
   population/sign bugs that every one of its own tests passed — the fixtures
   modeled a population production never actually produced.
+- **Real fixtures find things you would not have thought to test.** VS1's
+  actual committed `world-context.jsonl`, used as the import fixture, contains
+  two rows sharing the same `(date, slot, generated_at)` and differing only in
+  `scout_cached`. The importer's original identity key was exactly that triple,
+  so the real data — and nothing else — showed it would have silently dropped a
+  distinct row. Identity is now a hash of the whole row. Store such fixtures
+  gzipped if they are large; 136 genuine rows cost ~190KB compressed against
+  1.2MB raw, which is a good trade for keeping them real rather than trimmed.
 - **A fixture that is cleaner than production is not a test.** If a fixture
   has none of the messiness of the real data it's standing in for (missing
   fields, unexpected ordering, duplicate-looking rows), that's a gap, not a

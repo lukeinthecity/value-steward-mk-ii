@@ -340,6 +340,22 @@ produced the result.
 
 Revisit at the post-run review, when the exit rule itself has been measured.
 
+## World-state collection
+
+VS2 gathers the world-context dataset itself, in Python — VS1's Node pipeline
+is being retired, and depending on a retired system to feed a future mechanism
+is not a plan. This is data collection only; see "Planned second mechanism"
+below for the gate, which is unchanged and still deferred.
+
+Isolation is structural rather than conventional, because a convention nobody
+can check is not a boundary:
+
+- A separate entrypoint, never called from `run_daily.py`.
+- A separate cron line, lock file and log, so a world-fetch failure cannot
+  abort a cycle that is about to place orders.
+- No import in either direction between `vs2.world` and the trading path,
+  asserted against the real import graph in `tests/test_world_isolation.py`.
+
 ## Planned second mechanism (not built yet)
 
 World-state gating — permitting the analysis layer to suppress buying on
@@ -350,9 +366,11 @@ whether to act, never as a weight on a score, so its effect stays separable.
 Adding it before the baseline reads would repeat VS1's central mistake:
 introducing a second mechanism before the first one was measured.
 
-VS1's world-context pipeline stays running for exactly this reason. It contacts
-no broker, so it is unaffected by the trading retirement, and it continues to
-accumulate the dataset this mechanism will need.
+The dataset that mechanism will need is being brought into VS2 and gathered
+here natively — see "World-state collection" below. **Collection is not the
+mechanism.** It contacts no broker, feeds no decision, and cannot suppress a
+buy; moving it changes nothing about when the gate arrives, which is still
+after the baseline reads.
 
 ## What VS1 leaves behind
 
@@ -363,9 +381,16 @@ plus a checklist to run before adding any mechanism here. This is the reason to
 keep the VS1 repository, and it should be read before VS2 gains its second
 mechanism.
 
-**A world-context history.** 929 context rows and 9,046 hydrated items,
-accumulated daily and still growing, contacting no broker. This is the direct
-input to the deferred gating mechanism above.
+**A world-context history**, contacting no broker — the direct input to the
+deferred gating mechanism above. Measured 2026-08-09 rather than assumed: the
+working series is **939 rows spanning 2026-05-05 to 2026-08-07**, verified
+genuine (every row's `generated_at` falls on its own `date`, across 82 distinct
+generation days). An earlier block of 136 rows covers 2026-01-23 to 2026-03-20.
+Between them is a permanent six-week gap where collection had stopped, so the
+two are archived separately and never merged — see `world_history/README.md`.
+An earlier version of this section said "929 rows, accumulated daily and still
+growing", which described the recent window only and implied a continuity the
+data does not have.
 
 **Not a trading dataset.** 214 scorecard rows across three runs, inflated by
 duplication from four intraday execution slots. Keyed on `(symbol,
