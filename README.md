@@ -32,9 +32,11 @@ any mechanism here. It is the main reason the first repository is worth keeping.
 
 The first iteration was retired from trading on 2026-08-07 after three runs
 (2026-05-18 to 2026-08-07, 82 calendar days), having never produced a readable
-answer about whether its strategy worked. Its world-context pipeline still
-runs, because it contacts no broker and builds a dataset this system will need
-later.
+answer about whether its strategy worked. Its world-context pipeline outlived
+that retirement, because it contacts no broker — but its dataset is now being
+brought into VS2 and gathered here natively; see "World state" below. Nothing
+in `crontab -l` schedules it as of 2026-08-09, so any claim that it is "still
+running" needs a timestamp behind it before it is repeated.
 
 ## Status
 
@@ -90,6 +92,21 @@ A push is observability, never a control-path step: sending cannot raise, so a
 dead notification channel can never affect a cycle that is about to place
 orders. Every attempt is recorded in `data/pushes.jsonl`, because you cannot
 rely on the alert channel to tell you the alert channel is broken.
+
+## World state
+
+`src/vs2/world/` collects the world-context dataset DESIGN.md names as the
+input to its deferred second mechanism. **Collection is not that mechanism** —
+it feeds no decision and cannot suppress a buy, and the gate is still deferred
+until the crossover baseline produces a readable result. The boundary is
+asserted against the real import graph in `tests/test_world_isolation.py`
+rather than left to convention.
+
+`python -m vs2.world.cli` imports the history from value-steward. The working
+series is the most recent contiguous run (2026-05-05 onward); an earlier block
+is archived separately because a permanent six-week gap separates them and
+merging across it would produce a series later analysis must silently average
+over. See [`world_history/README.md`](world_history/README.md).
 
 ## Trading
 

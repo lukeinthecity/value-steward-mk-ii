@@ -91,6 +91,17 @@ since the beginning — keep it consistent.
   *execution* attempts at it, guarded to happen once. Confusing the two is how
   VS1's 214 scorecard rows turned out to be 104 real decisions, so keep the
   distinction sharp in any change to `run_daily.py`.
+- **The world layer is not the trading layer.** `src/vs2/world/` collects
+  world-state data for a mechanism DESIGN.md still defers. Nothing in it may
+  reach a decision: separate entrypoint, separate cron, and an import-boundary
+  test (`tests/test_world_isolation.py`) that fails if either side imports the
+  other. Collecting is not gating; don't let a future change blur that.
+- **World history lives in two places on purpose.** `world_history/*.jsonl.gz`
+  is tracked and immutable; `data/world_context.jsonl` is gitignored and live.
+  VS1 kept only the live kind, which is how its dataset ended up five months of
+  uncommitted changes to a tracked file. The pre-gap block
+  (2026-01-23..2026-03-20) is archived separately and **must not be merged**
+  into the working series — a permanent six-week hole separates them.
 - **Four append-only logs under `data/` are the run's only record**:
   `decisions.jsonl`, `executions.jsonl`, `fills.jsonl`, `sessions.jsonl`.
   Nothing recomputes them and nothing rewrites a row. If a change would make
