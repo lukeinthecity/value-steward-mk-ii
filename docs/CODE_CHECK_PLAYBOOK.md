@@ -112,6 +112,15 @@ otherwise-invisible bug in this project. Default to these over reading code.
   installed schedule with no daemon produces exactly the same output as a
   correct setup, and exactly zero runs. Confirmed running on this machine
   2026-08-09.
+- **A schedule is only as live as the machine under it, and on WSL that is not
+  a given.** WSL2 stops the distro when its last session closes; cron dies with
+  it, while `crontab -l` and `systemctl status cron` keep describing a machine
+  that is no longer running. This cost one session of six in the first dry-run
+  week (2026-08-14). The general form: when verifying any scheduled job, check
+  the freshness of its **output**, not the presence of its schedule —
+  `ls -la data/*.jsonl logs/*.log` and `uptime` answer in one line what
+  `crontab -l` cannot. An `uptime` of minutes on a machine you believe has been
+  up for days is the tell.
 - **Confirm the machine clock's timezone before trusting a schedule's times.**
   The crontab's hours assume US Eastern. `market_calendar.py` interprets the
   broker's naive timestamps explicitly, so the *code* is correct under any host

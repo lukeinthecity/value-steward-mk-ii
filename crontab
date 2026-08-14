@@ -51,7 +51,15 @@
 #    broker's calendar in Eastern and refuses an unfinished session), but the
 #    schedule would be pointless. Convert the times if the clock is not ET.
 #
-# 2. NOTIFICATIONS. Two channels, and they cover different things.
+# 2. THE VM HAS TO SURVIVE. On WSL, installing this crontab is not enough:
+#    WSL2 shuts the whole distro down when its last session closes, and cron
+#    goes with it. `crontab -l` and `systemctl status cron` will both still
+#    look correct afterwards, because they describe a machine that is no longer
+#    running. Keep a WSL window open, or set vmIdleTimeout / a Task Scheduler
+#    keepalive. Measured 2026-08-14: closing the window after Thursday cost
+#    Friday's session in the first dry-run week — one of six.
+#
+# 3. NOTIFICATIONS. Two channels, and they cover different things.
 #
 #    Push (ntfy) is the primary one: two notifications a trading day, on the
 #    same topic value-steward uses. It needs VS_NTFY_TOPIC in .env — with it
