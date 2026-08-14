@@ -93,15 +93,28 @@ since the beginning — keep it consistent.
 - **The crontab is environment state, not something this repo's git history
   tracks.** `crontab` at the repo root is a *template*, not what's installed.
   Run `crontab -l` to see the actual live schedule — always, before saying
-  anything about what is scheduled. **Checked 2026-08-09: `crontab -l` for
-  `lukes` is empty. Nothing is scheduled and nothing here has ever traded.**
-  An earlier version of this file said the crontab was "installed with
-  `--execute` commented out on every line", which was never true of the live
-  schedule; it described the template. Don't assume the line above is still
-  current either — check.
+  anything about what is scheduled. **Checked 2026-08-14: the dry-run lines
+  are installed (no `--execute` on any of them), and nothing here has ever
+  traded.** They went in on 2026-08-09, when `crontab -l` was empty; the first
+  week ran 2026-08-10..08-14. An earlier version of this file said the crontab
+  was "installed with `--execute` commented out on every line", which was never
+  true of the live schedule; it described the template. Don't assume the line
+  above is still current either — check.
   (Cron itself is running and the machine clock is US Eastern, both confirmed
   the same day: `systemctl status cron` showed the daemon active, and its
   timestamps read EDT, which is what the template's times assume.)
+- **WSL must stay resident, or cron does not run — installing the crontab is
+  not enough.** WSL2 shuts the VM down once the last session closes, taking
+  `cron` with it; an installed schedule and an active `cron.service` both stop
+  meaning anything at that moment. Keep a WSL window open (VS1's arrangement on
+  this always-on machine), or configure `vmIdleTimeout` / a Task Scheduler
+  keepalive. **Measured 2026-08-14**: the window was closed after Thursday's
+  session and Friday's decide window passed with the VM down — one session lost
+  out of six in the first dry-run week. The loss is detected rather than
+  silent: the next run reports `missed_sessions` and `main()` exits non-zero so
+  cron's MAILTO fires, verified against a simulated four-day outage. But
+  detection is not prevention, and each missed session is a hole in the
+  measurement.
 - **The cron fires many times a day, and that is not the same as deciding many
   times a day.** One decision per completed close; the intraday ticks are
   *execution* attempts at it, guarded to happen once. Confusing the two is how
