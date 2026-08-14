@@ -5,7 +5,7 @@
 # avoid. Bump these deliberately, between runs, not during one.
 #
 # Verified together against Python 3.11 and 3.12 with the full gate green.
-alpaca-py==0.43.5
+alpaca-py==0.44.0
 python-dotenv==1.2.2
 pytest==9.1.1
 ruff==0.16.2
