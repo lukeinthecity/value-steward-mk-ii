@@ -5,7 +5,18 @@
 # avoid. Bump these deliberately, between runs, not during one.
 #
 # Verified together against Python 3.11 and 3.12 with the full gate green.
-alpaca-py==0.44.0
+#
+# HELD for the run that arms 2026-08-17. alpaca-py stays at 0.43.5: that is
+# the version the dry-run week executed against the live paper account, and
+# the version the calendar's naive-Eastern timestamp behaviour was checked
+# against by hand. The gate cannot catch a change there -- every Alpaca client
+# is injected as a fake in tests, so the only real SDK import in the suite is
+# an enum, and a green run on a newer SDK says nothing about the assumption
+# market_calendar.py actually depends on. #18 bumped this two days before the
+# run started, which is the case these pins exist to prevent. Dependabot's pip
+# updates are paused to match (see .github/dependabot.yml). Resume both when
+# the run ends, and re-verify the calendar behaviour before adopting a bump.
+alpaca-py==0.43.5
 python-dotenv==1.2.2
 pytest==9.1.1
 ruff==0.16.2

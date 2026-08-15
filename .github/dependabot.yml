@@ -13,8 +13,16 @@ updates:
   # Python dependencies. Group minor + patch into one PR; majors stay
   # individual so breaking bumps get their own review. Security updates are
   # unaffected (they keep opening promptly, on their own).
+  #
+  # PAUSED 2026-08-15, for the 60-day run arming 2026-08-17. A dependency that
+  # moves mid-run changes the instrument the measurement is taken with, which
+  # is the failure requirements.txt's pins exist to prevent. Version updates
+  # are what open-pull-requests-limit: 0 stops; security updates come from
+  # Dependabot alerts and are not governed by this setting, so those keep
+  # arriving. Remove the limit when the run ends.
   - package-ecosystem: "pip"
     directory: "/"
+    open-pull-requests-limit: 0
     schedule:
       interval: "weekly"
     groups:
