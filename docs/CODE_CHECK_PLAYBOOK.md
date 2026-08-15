@@ -121,6 +121,13 @@ otherwise-invisible bug in this project. Default to these over reading code.
   `ls -la data/*.jsonl logs/*.log` and `uptime` answer in one line what
   `crontab -l` cannot. An `uptime` of minutes on a machine you believe has been
   up for days is the tell.
+- **Several of the checks below are executable — run them before reading rows
+  by hand.** `python -m vs2.health --no-push` applies the standing checks over
+  `data/` and prints findings: a stalled run, either once-per-day guard failing
+  to converge, a short decision day, a null exposure figure, stale bars, a
+  failed order. It exits 0 when it finds nothing. Note what it does *not* cover
+  — it dies with its own host, so it can never report the VM being down while
+  the VM is down.
 - **Confirm the machine clock's timezone before trusting a schedule's times.**
   The crontab's hours assume US Eastern. `market_calendar.py` interprets the
   broker's naive timestamps explicitly, so the *code* is correct under any host
