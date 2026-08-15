@@ -92,6 +92,21 @@ MAILTO=you@example.com
 # 15,30,45 16 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily --execute >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
 # 0 17 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.run_daily --execute >> /home/YOUR_USER/value-steward-2/logs/run_daily.log 2>&1
 
+# --- HEALTH CHECK. Reads the logs; places nothing, writes nothing to them. ---
+#
+# 17:30 is after the last decide tick at 17:00, so it reads a settled day.
+# Silence is the healthy outcome: findings push at priority 4 and exit 1, so
+# MAILTO backs the push. A daily "all is well" notification would be swiped
+# away unread within a week, and then the one that mattered would be too.
+#
+# It takes no lock, on purpose — it must be able to run while a trading cycle
+# is in flight, and it only ever reads.
+#
+# NOTE: this cannot detect its own host being down. If the VM stops, this does
+# not run either. The live signal for that is the absence of the two daily
+# pushes; RUN_STALLED only reports it once the machine is back.
+30 17 * * 1-5 cd /home/YOUR_USER/value-steward-2 && mkdir -p logs && /home/YOUR_USER/value-steward-2/.venv/bin/python -m vs2.health >> /home/YOUR_USER/value-steward-2/logs/health.log 2>&1
+
 # --- The universe is NOT refreshed on a schedule, deliberately. ---
 #
 # DESIGN.md calls the Dow 30 membership "refreshed monthly", and index

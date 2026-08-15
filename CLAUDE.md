@@ -137,6 +137,11 @@ since the beginning — keep it consistent.
   any of them unwritten for a session, that session becomes unmeasurable —
   `python -m vs2.report` will say so, and should be run after touching
   anything in the daily cycle.
+- **`python -m vs2.health` is the standing check over those logs**, on its own
+  cron line at 17:30 ET. It is a *reader*: no lock, no writes to the four logs,
+  no import from `vs2.core`. Silence means healthy; findings push at priority 4
+  and exit non-zero. It cannot detect the VM being down — it dies with the same
+  host — so the live signal for that remains the absence of the daily pushes.
 - **Runnable scripts must guard `main()`** behind an
   `if __name__ == "__main__":` check (see `index_membership.py` or
   `run_daily.py`) so importing them for tests never executes real work

@@ -93,6 +93,31 @@ dead notification channel can never affect a cycle that is about to place
 orders. Every attempt is recorded in `data/pushes.jsonl`, because you cannot
 rely on the alert channel to tell you the alert channel is broken.
 
+## Health checks
+
+`python -m vs2.health` reads the append-only logs from outside a cycle and
+reports what a run cannot report about itself. `run_daily` announces a failed
+order or a missed session; it cannot announce never having started, because a
+process that does not start sends nothing. That is not hypothetical — the
+first dry-run week lost a session to a VM that shut down with its terminal,
+and the only reason it was noticed is that somebody went looking.
+
+Eight checks, each traceable to a defect that actually occurred: a stalled
+run, missed sessions, either once-per-day guard failing to converge, a day
+that decided fewer than the full universe, a null exposure figure, stale bars,
+and a failed order. Silence is the healthy outcome — findings push at priority
+4 and exit non-zero so `MAILTO` backs the push, while a daily "all is well"
+notification would be swiped away unread within a week.
+
+It is a reader: no lock, no writes to the four logs, no import from
+`vs2.core`, and it cannot reach a trading decision.
+
+**It cannot detect its own host being down.** If the VM stops, this does not
+run either, and `RUN_STALLED` reports the outage only once the machine is
+back. The live signal for a dead host is the absence of the two daily pushes.
+Closing that properly needs an off-box dead man's switch, which is not built
+here.
+
 ## World state
 
 `src/vs2/world/` collects the world-context dataset DESIGN.md names as the
